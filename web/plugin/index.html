@@ -1,0 +1,43 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: GPL-3.0-only
+     Copyright (C) 2026 weavejam
+     FM1 Open for tuttidaw: the plugin page (web/plugin/README.md). The device (device.js) and the companion panel
+     (panel.js) on the page's FM1 Open (worklet-tutti.js), tuttidaw's protocol (tutti.js). sdk/I18n.js (the workbench's
+     texts, English by default) and sdk/WebUpdate.js (its file formats) are FM1 Open's own, unchanged. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>FM1 Open · tuttidaw plugin</title>
+<link rel="icon" href="../icon.svg">
+<link rel="stylesheet" href="device.css">
+<link rel="stylesheet" href="plugin.css">
+<script src="I18n.js"></script>
+<script src="WebUpdate.js"></script>
+<script type="module" src="tutti.js"></script>
+</head>
+<body>
+<main id="tt-main">
+<header id="tt-bar" class="tt-bar">
+  <b class="tt-name">FM1 Open</b>
+  <button id="tt-audio" class="primary" hidden>Start audio</button>
+  <button id="tt-play" data-ready disabled aria-pressed="false">播放</button>
+  <button id="tt-tap" data-ready disabled title="连按设置 BPM">TAP</button>
+  <button id="tt-panic" data-ready disabled>紧急停音</button>
+  <span id="tt-connected" hidden><button id="tt-commit" class="primary" data-ready disabled title="Render the pattern into tuttidaw at tuttidaw's tempo">Render to tuttidaw</button>
+    <label class="tt-check"><input type="checkbox" id="tt-stems"> stems T1–T8</label></span>
+  <label class="tt-vol">试听音量 <input type="range" id="tt-vol" min="0" max="100" value="100" aria-label="试听音量"></label>
+  <span id="tt-render" hidden>rendering <progress id="tt-progress" max="1" value="0"></progress></span>
+  <span id="tt-note" class="tt-note" role="status" aria-live="polite"></span>
+</header>
+<div class="tt-body">
+  <div class="tt-stage"><div id="sim-device" class="sim-device" aria-label="FM1 Open"></div></div>
+  <aside id="tt-side" class="tt-side" aria-label="Project, tracks, samples"></aside>
+</div>
+<footer id="tt-foot" class="tt-foot">Unofficial plugin build of M-VAVE's open-source FM1 Open firmware by weavejam. Not
+  affiliated with or endorsed by M-VAVE. GPL-3.0-only · <a href="../credits.html" target="_blank" rel="noopener">credits,
+  licences</a> · <a id="tt-source-link" href="https://github.com/weavejam/fm1_open" target="_blank" rel="noopener">source</a></footer>
+</main>
+</body>
+</html>

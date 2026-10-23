@@ -177,6 +177,13 @@ __attribute__((noinline, cold, minsize)) static unsigned delay_ticks(unsigned va
         return (ms * 441U + 40U) / 80U;
     }
     static const uint8_t pulses[] = {2, 3, 4, 6, 8, 9, 12, 18, 24};
+#ifdef FM1_TUTTI
+    if (fm1_tutti_bpm_q32) { /* the host's tempo, fractional: the nearest tick */
+        uint64_t den = fm1_tutti_bpm_q32 * 24U;
+        uint64_t ticks = (((uint64_t)330750U * pulses[value - GROOVE_DELAY_SYNC] << 32) + den / 2U) / den;
+        return ticks < FM1_FX_DELAY_SAMPLES ? (unsigned)ticks : FM1_FX_DELAY_SAMPLES - 1U;
+    }
+#endif
     unsigned denominator = effects_tempo * 24U;
     unsigned ticks = (330750U * pulses[value - GROOVE_DELAY_SYNC] + denominator / 2U) / denominator;
     return ticks < FM1_FX_DELAY_SAMPLES ? ticks : FM1_FX_DELAY_SAMPLES - 1U;
@@ -202,9 +209,15 @@ __attribute__((cold, minsize)) static unsigned delay_nearest(unsigned ticks, uns
     }
     return best;
 }
+#ifdef FM1_TUTTI
+static uint64_t effects_q32; /* the host's tempo the delay was set for */
+#endif
 __attribute__((cold, minsize)) static void effects_poll(void)
 {
     if (!groove_delay_synced(effects_values[1])) return;
+#ifdef FM1_TUTTI
+    if (fm1_tutti_bpm_q32 != effects_q32) { effects_q32 = fm1_tutti_bpm_q32; effects_tempo = 0; }
+#endif
     unsigned bpm = groove_tempo_current();
     if (!bpm || bpm == effects_tempo) return;
     effects_tempo = bpm; /* No division or audio gate work while BPM is unchanged. */
@@ -602,9 +615,15 @@ static FM1_DSP_CODE unsigned arp_period(unsigned t, unsigned external)
     }
     return arpeggio[t].odd ? base - shift : base + shift;
 }
+#ifdef FM1_TUTTI
+static uint32_t tutti_arp_carry[GROOVE_TRACKS]; /* the fraction of a clock unit not yet in each phase, Q32 */
+#endif
 FM1_DSP_CODE void groove_arp_render(unsigned tempo)
 {
     for (unsigned t = 0; t < GROOVE_TRACKS; ++t) {
+#ifdef FM1_TUTTI
+        if (!arpeggio[t].started) tutti_arp_carry[t] = 0;
+#endif
         if (!arpeggio[t].enabled || !(arpeggio[t].held || (arpeggio[t].hold && arpeggio[t].latched))) { arp_restart(t); continue; }
         unsigned period = arp_period(t, 0);
         if (!arpeggio[t].started) { arpeggio[t].phase = 0; arp_next(t); }
@@ -614,6 +633,14 @@ FM1_DSP_CODE void groove_arp_render(unsigned tempo)
         }
         if (arpeggio[t].phase >= period / 4U * (arpeggio[t].gate + 1U) && arpeggio[t].note != 255)
             groove_note(t, arpeggio[t].note, 0, 2);
+#ifdef FM1_TUTTI
+        if (fm1_tutti_bpm_q32) {
+            uint64_t units = fm1_tutti_bpm_q32 * (24U * FM1_BLOCK_FRAMES) + tutti_arp_carry[t];
+            arpeggio[t].phase += (uint32_t)(units >> 32);
+            tutti_arp_carry[t] = (uint32_t)units;
+            continue;
+        }
+#endif
         arpeggio[t].phase += tempo * 24U * FM1_BLOCK_FRAMES;
     }
 }
@@ -1067,6 +1094,45 @@ static FM1_DSP_CODE inline int32_t track_gain(unsigned track)
     return tracks[track].expression == 127 ? tracks[track].gain :
         (int32_t)((int64_t)tracks[track].gain * tracks[track].expression / 127);
 }
+#ifdef FM1_TUTTI
+unsigned fm1_tutti_capture, fm1_tutti_no_click;
+int32_t fm1_tutti_cap[GROOVE_TRACKS][4][FM1_BLOCK_FRAMES];
+/* One track's share of render_stereo's sums, as it adds them (the same products, not summed with the others). */
+static FM1_DSP_CODE void tutti_capture_stereo(unsigned t, unsigned type, unsigned modulated, int32_t gain,
+                                              const int32_t *left, const int32_t *right,
+                                              const int32_t *rev, const int32_t *dly)
+{
+    int32_t (*cap)[FM1_BLOCK_FRAMES] = fm1_tutti_cap[t];
+    if (!gain) return;
+    if (type != GROOVE_808 && !modulated && tracks[t].pan == 64) {
+        (void)fm1_mix128(cap[0], left, gain, 0);
+        memcpy(cap[1], cap[0], sizeof cap[0]);
+    } else {
+        unsigned pan = tracks[t].pan;
+        int32_t lg = pan <= 64 ? gain : (int32_t)((int64_t)gain * (127U - pan) / 63);
+        int32_t rg = pan >= 64 ? gain : (int32_t)((int64_t)gain * pan / 64);
+        (void)fm1_mix128(cap[0], left, lg, 0);
+        (void)fm1_mix128(cap[1], type == GROOVE_808 || modulated ? right : left, rg, 0);
+        if (type == GROOVE_808) {
+            fm1_send128(cap[2], rev, gain);
+            fm1_send128(cap[3], dly, gain);
+        }
+    }
+    if (tracks[t].sends[0] || tracks[t].sends[1]) {
+        int32_t average[FM1_BLOCK_FRAMES];
+        const int32_t *send = left;
+        if (type == GROOVE_808 || modulated) {
+            for (unsigned i = 0; i < FM1_BLOCK_FRAMES; ++i)
+                average[i] = left[i] / 2 + right[i] / 2;
+            send = average;
+        }
+        if (tracks[t].sends[0])
+            fm1_send128(cap[2], send, (int32_t)((int64_t)gain * tracks[t].sends[0] / 15));
+        if (tracks[t].sends[1])
+            fm1_send128(cap[3], send, (int32_t)((int64_t)gain * tracks[t].sends[1] / 15));
+    }
+}
+#endif
 static FM1_DSP_CODE void render_stereo(int32_t *out)
 {
     int32_t *left = scratch.mono, *right = scratch.right;
@@ -1076,6 +1142,9 @@ static FM1_DSP_CODE void render_stereo(int32_t *out)
     memset(mix_right, 0, sizeof scratch.mix_right);
     memset(scratch.reverb_bus, 0, sizeof scratch.reverb_bus);
     memset(scratch.delay_bus, 0, sizeof scratch.delay_bus);
+#ifdef FM1_TUTTI
+    if (fm1_tutti_capture) memset(fm1_tutti_cap, 0, sizeof fm1_tutti_cap);
+#endif
     for (unsigned t = 0; t < GROOVE_TRACKS; ++t) {
         unsigned type = tracks[t].type, peak = 0;
         if (!sources[t].ptr) {
@@ -1126,6 +1195,9 @@ static FM1_DSP_CODE void render_stereo(int32_t *out)
                 }
             }
         }
+#ifdef FM1_TUTTI
+        if (fm1_tutti_capture) tutti_capture_stereo(t, type, modulated, gain, left, right, rev, dly);
+#endif
         if (gain && (tracks[t].sends[0] || tracks[t].sends[1])) {
             /* Post-fader sends follow mute/solo and track modulation. For stereo
              * tracks, feed their average without changing the dry stereo mix. */
@@ -1159,6 +1231,9 @@ static FM1_DSP_CODE void render(int32_t *out, unsigned frames)
         return;
     }
     int32_t *mono = scratch.mono, *mix = scratch.mix, *sends = scratch.sends;
+#ifdef FM1_TUTTI
+    if (fm1_tutti_capture) memset(fm1_tutti_cap, 0, sizeof fm1_tutti_cap);
+#endif
     for (unsigned t = 0; t < GROOVE_TRACKS; ++t) {
         unsigned type = tracks[t].type, peak = 0;
         /* Melodic C engines overwrite; DX7 and 808 add to the buffer. */
@@ -1194,6 +1269,12 @@ static FM1_DSP_CODE void render(int32_t *out, unsigned frames)
         }
         /* Mix tracks in order and quantize the completed bus once. */
         peak = fm1_mix128(mix, mono, gain, t != 0);
+#ifdef FM1_TUTTI
+        if (fm1_tutti_capture) {
+            (void)fm1_mix128(fm1_tutti_cap[t][0], mono, gain, 0);
+            memcpy(fm1_tutti_cap[t][1], fm1_tutti_cap[t][0], sizeof fm1_tutti_cap[t][0]);
+        }
+#endif
         publish(t, meter_level(peak));
     }
     /* Convert the completed mix to interleaved stereo. */
@@ -1203,6 +1284,9 @@ int fm1_engine_render(int32_t *output, unsigned frames)
 {
     if (!output || frames != FM1_BLOCK_FRAMES) return -1;
     render(output, frames);
+#ifdef FM1_TUTTI
+    if (!fm1_tutti_no_click)
+#endif
     groove_sequence_click(output, frames);
     render_capacity = 0;
     for (unsigned track = 0; track < GROOVE_TRACKS; ++track)

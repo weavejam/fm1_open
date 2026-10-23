@@ -1,0 +1,85 @@
+/* SPDX-License-Identifier: GPL-3.0-only
+ * Copyright (C) 2026 weavejam
+ * The FM1 panel's look on the plugin page: the device's rules of the workbench's page (sdk/Update.html.in, FM1 Open,
+ * GPL-3.0-only WITH GPL-3.0-linking-exception), copied as they are (its base rules, then its "workbench shell" ones),
+ * here under GPL-3.0-only. The drawing is in container units (cqw) of the device's box: tutti.js sizes the box. */
+.sim-device{container-type:inline-size;position:relative;width:100%;min-width:720px;aspect-ratio:1000/624;border:1px solid #505453;border-radius:2.5%;background:linear-gradient(145deg,#343838 0%,#292d2e 40%,#252829 100%);box-shadow:inset 0 1px 1px #949b9680,inset 0 -5px 0 #161b1b,0 4px 0 #0c1010,0 12px 24px #0007,0 30px 60px #0004;user-select:none;-webkit-user-select:none}
+.sim-device:after{pointer-events:none;content:"";position:absolute;inset:0;border-radius:inherit;background:linear-gradient(100deg,#ffffff04,transparent 55%)}
+.device-brand{position:absolute;left:5.2%;top:3%;font:700 1.3cqw/1 Consolas,"Liberation Mono",monospace;letter-spacing:.15em;color:#b3bcb7}
+.device-brand span{font-size:.8cqw;font-weight:400;color:#75817c;margin-left:1cqw;letter-spacing:.08em}
+.case-mark{position:absolute;right:4.8%;top:3%;font:.8cqw Consolas,"Liberation Mono",monospace;letter-spacing:.18em;color:#778680}
+.screw{position:absolute;width:.7%;height:1.12%;border-radius:50%;background:linear-gradient(45deg,#171b1a 45%,#747d7855 48%,#1a1e1c 55%);box-shadow:0 1px 1px #69746a50}
+.screw.tl{left:2%;top:3%}
+.screw.tr{right:2%;top:3%}
+.screw.bl{left:2%;bottom:3%}
+.screw.br{right:2%;bottom:3%}
+.screen-bezel{position:absolute;left:29.2%;top:7.05%;width:25.6%;height:41.03%;padding:.8%;border:1px solid #111615;background:#101513;border-radius:2%;box-shadow:0 1px 1px #73807760,inset 0 2px 5px #0008}
+#sim-screen{display:block;width:100%;height:100%;image-rendering:pixelated;background:#000;border:1px solid #0d1110}
+.screen-placeholder{position:absolute;inset:8%;display:grid;place-content:center;text-align:center;color:#89988c;font:1.1cqw/1.8 system-ui}
+.screen-placeholder strong{color:var(--accent);font-size:3cqw;letter-spacing:.16em}
+.screen-caption{position:absolute;top:48.9%;left:29.2%;width:25.6%;display:flex;justify-content:space-between;font:.67cqw Consolas,"Liberation Mono",monospace;letter-spacing:.15em;color:#718077}
+.encoder{position:absolute;width:8%;height:7.7%;transform:translate(-50%,-50%);text-align:center;z-index:2}
+.encoder>span{position:absolute;bottom:calc(100% + 1.1cqw);left:-12%;right:-12%;font:600 1cqw/1 Consolas,"Liberation Mono",monospace;color:#b6c4bd;letter-spacing:.04em}
+.encoder .dial{display:block;position:relative;width:60%;height:100%;margin:0 auto;padding:0;border:2px solid #111815;border-radius:50%;background:radial-gradient(circle at 38% 28%,#59625c 0%,#3c4740 45%,#262f29 75%,#141c17 90%);box-shadow:0 .35cqw .45cqw #0009,inset 0 .1cqw .15cqw #99a59790;touch-action:none}
+.encoder .dial:hover{border-color:#8baca0}
+.dial i{position:absolute;left:calc(50% - 1px);top:8%;width:2px;height:27%;border-radius:1px;background:#d0e6d7;transform-origin:50% 154%;transform:rotate(var(--angle,0deg));box-shadow:0 0 .3cqw #d3fadd40}
+.detents{position:absolute;left:0;right:0;top:calc(100% + .55cqw);display:flex;justify-content:center;gap:.5cqw;opacity:0;transition:opacity .1s}
+.encoder:hover .detents,.encoder:focus-within .detents{opacity:1}
+.detents button{width:2.8cqw;height:1.9cqw;margin:0;padding:0;font:1.3cqw/1 system-ui;border:1px solid #53665a;border-radius:.3cqw;background:#222c26;color:#bdd2c3}
+.panel-button{position:absolute;z-index:2;display:flex;flex-direction:column;align-items:center;justify-content:center;margin:0;padding:0;border:1px solid #141d18;border-top-color:#81938b60;border-radius:.7cqw;color:#c1d2c8;background:linear-gradient(#45534b,#38463e);box-shadow:0 .3cqw 0 #111c15,0 .45cqw .5cqw #0006,inset 0 .12cqw .12cqw #b4cebc22;font:600 1cqw/1.35 Consolas,"Liberation Mono",monospace;letter-spacing:.025em;touch-action:none}
+.panel-button:hover{background:linear-gradient(#53665a,#465d4f);border-color:#99baa170}
+.panel-button small{font:.58cqw/1.2 Consolas,"Liberation Mono",monospace;color:#829b89}
+.panel-button[data-button="12"]{color:#c4e8b3}
+.panel-button[data-button="13"]{color:#f6b4a1}
+.panel-button.lit{background:linear-gradient(#54745e,#45634f);color:#e7ffe1;border-top-color:#b2dcad}
+.panel-button.held{box-shadow:0 .1cqw 0 #15251b,inset 0 .2cqw .4cqw #09130c99;transform:translateY(.2cqw);background:#607d65}
+.panel-button.latched{outline:1px solid #c5e59c;outline-offset:2px}
+.panel-button.latched:after{position:absolute;right:.4cqw;top:.35cqw;width:.35cqw;height:.35cqw;border-radius:50%;background:#e0f9aa;content:""}
+.keyboard{position:absolute;left:3.6%;top:53.2%;width:92.8%;height:41%;border-radius:1cqw;border:1px solid #111916;background:linear-gradient(#171e1a,#1c231f);box-shadow:inset 0 .35cqw .5cqw #0006,0 .1cqw 0 #66776d40}
+.piano-key{position:absolute;transform:translateX(-50%);margin:0;padding:0;border:1px solid #0e1510;border-radius:2.3cqw;width:4.35%;background:linear-gradient(110deg,#3e4b40,#2b392e 55%,#212d24);box-shadow:inset .15cqw 0 .25cqw #8ea79244,0 .4cqw .4cqw #0009;touch-action:none;opacity:1!important;color:#7f9888}
+.piano-key.white{top:48%;height:43%}
+.piano-key.black{top:6%;height:37%;width:4.1%;background:linear-gradient(110deg,#333b35,#212b23 55%,#1b241d)}
+.piano-key>i{position:absolute;left:calc(50% - 1px);width:2px;top:17%;height:48%;border-radius:1px;background:#5a7660;box-shadow:inset 0 0 1px #07150a}
+.piano-key span{position:absolute;bottom:10%;left:-10%;right:-10%;font:.75cqw/1 Consolas,"Liberation Mono",monospace;letter-spacing:.025em}
+.piano-key.black span{font-size:.65cqw;bottom:11%}
+.piano-key:hover{border-color:#91b697;background:#415b47}
+.piano-key.held{background:linear-gradient(#67866a,#4e6e53);transform:translate(-50%,.22cqw);box-shadow:inset 0 .25cqw .35cqw #152b1890,0 .1cqw .2cqw #0007}
+.piano-key.lit>i,.piano-key.held>i{background:#c3f5a4;box-shadow:0 0 .65cqw #a0ec79aa}
+.piano-key.lit span,.piano-key.held span{color:#c8e3bf}
+@media(hover:none){.detents{opacity:1}}
+#sim-lcd-value{border-radius:8px;padding:8px;background:#102329;cursor:ns-resize}
+.save-dialog{width:min(460px,90vw);padding:24px;color:#e2ece6;background:#1b2821;border:1px solid #739a80;border-radius:12px}
+.save-dialog::backdrop{background:#000b}
+.save-dialog select{width:100%}
+.save-dialog p{font-size:13px}
+.save-dialog h2{margin-top:0}
+.save-dialog button{margin:8px 8px 0 0}
+.save-dialog [role=status]{min-height:22px;color:#c5eacb}
+.sim-device{background:linear-gradient(125deg,#3e474b 0%,#2b3439 44%,#232d32 100%);border-color:#58646a;box-shadow:inset 0 1px 1px #bacac466,inset 0 -4px 0 #182125,0 4px 0 #080e12,0 22px 40px #0006;border-radius:2.3%}
+.device-brand{color:#d0dcd9}
+.case-mark,.screen-caption{color:#92a29f}
+.encoder>span{color:#c3d2d3;font-size:1.05cqw}
+.encoder .dial{background:radial-gradient(circle at 37% 25%,#75827f 0%,#505e5c 40%,#303e3d 76%,#1c2a29 94%);border-color:#172325;box-shadow:0 .4cqw .5cqw #0008,inset 0 .12cqw .16cqw #c9d9d388}
+.detents button{background:#1a292e;border-color:#5c7575;color:#e4f5f0}
+.panel-button{background:linear-gradient(#516160,#3c4b4c);color:#d2dfdf;border-top-color:#a8bdbc55;border-radius:.6cqw;font-size:1.02cqw}
+.panel-button:hover{background:linear-gradient(#647b74,#476359)}
+.panel-button[data-button="12"]{color:#bcfbd9;background:linear-gradient(#446b58,#355444)}
+.panel-button[data-button="13"]{color:#ffd0bd}
+.keyboard{background:linear-gradient(#172328,#1a262a);border-color:#162023;box-shadow:inset 0 .35cqw .6cqw #0007,0 .1cqw 0 #859b9744}
+.piano-key.white{background:linear-gradient(110deg,#60716c,#425a50 58%,#314a3e);color:#aabfb7}
+.piano-key.black{background:linear-gradient(110deg,#35464a,#25363a 58%,#1c2b31);color:#90a9a3}
+.piano-key>i{background:#8daa9d}
+.piano-key.black>i{background:#587e71}
+.save-dialog{background:#19282e;border-color:#6a9e88;box-shadow:0 24px 90px #0007;border-radius:12px}
+.save-dialog p{color:#afc0c4}
+.save-dialog::backdrop{background:#071015bf}
+.lcd-surface{position:relative;width:100%;height:100%}
+#sim-lcd-targets{position:absolute;inset:0}
+.lcd-target{position:absolute;margin:0;padding:0;min-width:0;border:0;border-radius:0;background:transparent;color:transparent;opacity:1}
+.lcd-target:hover,.lcd-target:focus-visible{background:#a9efd722;outline:1px solid #a9efd7;outline-offset:-1px}
+.lcd-target:disabled{pointer-events:none;background:transparent;opacity:0}
+.lcd-editor{text-align:center;max-width:360px;width:calc(100% - 32px)}
+.lcd-editor h3{font-size:24px;margin:6px 0}
+.lcd-value{font:32px/1.4 Consolas,monospace;color:#a9efd7;margin:12px}
+.lcd-adjust{display:flex;gap:12px;justify-content:center}
+.lcd-adjust button{font-size:24px;width:90px;margin:0}

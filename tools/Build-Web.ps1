@@ -28,7 +28,7 @@ function Build-Simulator {
     $inputs = @{}
     foreach ($file in Get-ChildItem -LiteralPath @((Join-Path $root 'app'), (Join-Path $root 'web'), (Join-Path $root 'third_party/synth')) -Recurse -File) {
         $name = $file.FullName.Substring($root.Length+1).Replace('\','/')
-        if (!$name.StartsWith('app/board/') -and $file.Extension -cin @('.c','.h','.inc')) { $inputs[$name] = Hash $file.FullName }
+        if (!$name.StartsWith('app/board/') -and !$name.StartsWith('web/plugin/') -and $file.Extension -cin @('.c','.h','.inc')) { $inputs[$name] = Hash $file.FullName }
     }
     foreach ($name in @('tools/Build-Web.ps1') +
         @(Get-ChildItem -LiteralPath (Join-Path $root 'sdk/include') -Filter '*.h' | ForEach-Object { 'sdk/include/' + $_.Name })) {

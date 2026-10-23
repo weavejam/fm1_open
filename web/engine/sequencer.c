@@ -25,6 +25,12 @@ static struct {
     uint8_t positions[GROOVE_TRACKS];
 } published;
 enum { PERIOD = FM1_SAMPLE_RATE * 60U };
+#ifdef FM1_TUTTI
+uint64_t fm1_tutti_bpm_q32;
+unsigned fm1_tutti_clock_internal;
+uint32_t fm1_tutti_ticks;
+static uint32_t tutti_carry; /* the fraction of a clock unit not yet in phase, Q32 */
+#endif
 static const uint8_t common_chords[][8] = {
     {3, 4, 7}, {3, 3, 7}, {4, 4, 7, 11}, {4, 3, 7, 10},
     {4, 4, 7, 10}, {3, 2, 7}, {3, 5, 7}, {3, 3, 6},
@@ -269,6 +275,9 @@ FM1_DSP_CODE unsigned groove_clock_mode(void)
 }
 __attribute__((cold, minsize)) void groove_clock_set(unsigned mode)
 {
+#ifdef FM1_TUTTI
+    if (fm1_tutti_clock_internal) mode = GROOVE_CLOCK_INTERNAL; /* hosted: the host's tempo, the setting kept */
+#endif
     if (mode > GROOVE_CLOCK_MIDI || mode == clock_mode)
         return;
     fm1_web_pause();
@@ -312,6 +321,10 @@ FM1_DSP_CODE void groove_sequence_transport(uint8_t status)
         release(c);
         groove_arp_reset(status == 0xff);
         c->phase = c->tick = c->pulse = 0;
+#ifdef FM1_TUTTI
+        tutti_carry = 0;
+        fm1_tutti_ticks = 0;
+#endif
         c->first = 1;
         c->playing = status == 0xfa;
         c->countdown = status == 0xfa && options.count_in && groove_edit_recording() ? 17 : 0;
@@ -397,14 +410,47 @@ FM1_DSP_CODE void groove_sequence_render(void)
         else {
             c->phase -= step_period(c);
             c->tick = (uint8_t)((c->tick + 1U) & 63U);
+#ifdef FM1_TUTTI
+            ++fm1_tutti_ticks;
+#endif
         }
         sequence_event();
     }
     for (unsigned i = 0; i < GROOVE_TRACKS; ++i)
         if (c->gate[i] && !c->tied[i] && c->phase >= c->gate[i])
             release_track(c, i);
+#ifdef FM1_TUTTI
+    if (fm1_tutti_bpm_q32) {
+        /* A block at the host's tempo: tempo x 4 units a frame, the fraction carried (exact over any length). */
+        uint64_t units = fm1_tutti_bpm_q32 * (4U * FM1_BLOCK_FRAMES) + tutti_carry;
+        c->phase += (uint32_t)(units >> 32);
+        tutti_carry = (uint32_t)units;
+        return;
+    }
+#endif
     c->phase += tempo * 4U * FM1_BLOCK_FRAMES;
 }
+#ifdef FM1_TUTTI
+uint32_t fm1_tutti_phase(void) { return sequence_clock.phase; }
+void fm1_tutti_locate(uint32_t ticks, uint32_t phase)
+{
+    struct clock_state *c = &sequence_clock;
+    if (!c->playing || clock_mode == GROOVE_CLOCK_MIDI) return;
+    release(c);
+    c->first = 0;
+    c->countdown = 0;
+    c->tick = (uint8_t)(ticks & 63U);
+    c->phase = phase;
+    tutti_carry = 0;
+    fm1_tutti_ticks = ticks;
+    for (unsigned i = 0; i < GROOVE_TRACKS; ++i) {
+        c->length[i] = lengths[i];
+        c->current[i] = (uint8_t)(ticks % c->length[i]);
+        c->next[i] = (uint8_t)((ticks + 1U) % c->length[i]);
+    }
+    clock_publish();
+}
+#endif
 FM1_DSP_CODE void groove_sequence_click(int32_t *out, unsigned frames)
 {
     struct clock_state *c = &sequence_clock;
