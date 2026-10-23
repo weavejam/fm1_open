@@ -106,7 +106,8 @@ checks' screenshots).
   `init`. Edit mode: FM1 Open starts with the state (on its own where the browser lets the frame play sound, else with
   "Start audio"; any click or key starts it). It saves nothing in this browser; tuttidaw's transport drives its preview
   (listen-only: it starts at `atEpochMs` less the output latency, placed at once where the host is, a drift of over
-  20 ms re-places it). Renders run in a Worker, so FM1 Open and its panel stay live. `mode: "render"` is headless: no
+  20 ms re-places it; a new `generation` stops the run before it at once, so nothing of it plays on until, or through
+  the pre-roll before, the new start). Renders run in a Worker, so FM1 Open and its panel stay live. `mode: "render"` is headless: no
   FM1 in the page, no audio, only renders.
 - **Render to tuttidaw** sends `commit` with `fromBeat` 0, `toBeat` and `lengthBeats` (protocol 4b) = one pass of the
   pattern: until every track's loop meets again (the least common multiple of the tracks' lengths of 16, 32, 48 or 64
@@ -220,7 +221,9 @@ settings). For the render every track is a **PLAY track on its own MIDI channel*
 | 0 .. 7 | T1 .. T8 with their engines and sounds (DX7, 303, PSG, PLUCK: notes with velocity, pitch bend, the engines' CCs, CC 7 / 10 / 11, CC 64; the 808: GM drum notes 35 .. 56; the sampler: notes 36, 37, 38, 41, 42, 46, 47, 48) |
 | 8 .. 15 | nothing |
 
-A PLAY track is unmuted (as on the FM1), so T6 and T7, muted in a new FM1's project, play their channels too.
+A PLAY track is unmuted (as on the FM1), so T6 and T7, muted in a new FM1's project, play their channels too. A track
+the user had set to PLAY plays as it played on the live FM1 (its timbre, mix, arpeggiator and tuning: the state's live
+session), not its dormant arrangement row.
 
 Notes are released at `min(end, toBeat)`; a note's off comes at least a block (128 frames) after its on, so a note of
 length 0 (or less) still sounds and is let go, never off before on; moved that way, it still comes before the next note
@@ -239,23 +242,29 @@ exact ratio 160/147, 192 taps, centred on each output frame (no delay). A 1 kHz 
 
 ## State
 
-The full user state (`state.js`, `stateVersion` 1): the working project as the workbench exports it (the v4 project
-of 4064 bytes and its 200-byte "FM1T" tuning tail, so edits not saved to a slot are in it), and every sector of the
+The full user state (`state.js`, `stateVersion` 2; version 1 is still read): the working project as the workbench
+exports it (the v4 project of 4064 bytes and its 200-byte "FM1T" tuning tail, so edits not saved to a slot are in it),
+the live session (`fm1_plugin.c tutti_session`, 4272 bytes: what the export leaves out, since for a PLAY or OFF track
+it has the dormant arrangement row: the raw capture with each PLAY track's live timbre, mix, sends, arpeggiator, mute
+and solo, each track's live tuning, the track roles and MIDI input channels as they are now), and every sector of the
 flash that holds something (`sim_flash`, 536576 bytes: the 16 project slots and the device settings (MIDI, clock, the
 slot loaded at power-on), the sample bank with the 8 user sample slots, the 4 DX7 library banks, the tuning sector with
 the track roles and input channels), and the plugin's meta (none yet). Format: `"FM1P"`, u32 version, u32 meta length,
-the meta (JSON), u32 project length (4264), the project, u32 count, then count x (u32 offset, 4096 bytes),
-little-endian. A new FM1 is about 80 KiB (its demo sample bank); a full flash about 540 KiB, far under the host's 8 MiB.
+the meta (JSON), u32 project length (4264), the project, u32 session length (4272, or 0), the session, u32 count,
+then count x (u32 offset, 4096 bytes), little-endian (version 1: no session length or session). A new FM1 is about
+85 KiB (its demo sample bank); a full flash about 540 KiB, far under the host's 8 MiB.
 An instance boots from it as the workbench restores a saved simulator (the flash, `sim_boot`), then imports the project
-(`sim_import`). PLAY tracks' live timbre edits are not in a project, as on the FM1 (export a timbre file, or save DX7
-voices to the library).
+(`sim_import`), then applies the live session (`tutti_session_apply`: the roles and channels, then each PLAY track's
+timbre, arpeggiator, mute / solo and tuning). An init with a version 1 state gives it back as version 2.
 
 `plugin_test.mjs` checks the round trip: a project with tuning, a user sample in slot 1, a DX7 library bank written, a
 device setting, an unsaved edit; packed, unpacked, booted in a fresh FM1: the same project bytes, the same flash byte for
-byte, the same renders (mix and stems), the user sample and the tuning audible.
+byte, the same renders (mix and stems), the user sample and the tuning audible; and the live session: a PLAY track's
+timbre (edited live: a new revision, get-state, init in a fresh session), arpeggiator and tuning sound in a use-B render
+on its channel, unlike the dormant row's; a version 1 state reads.
 
 Revisions: 1 is the state `init` gave (without one: a new FM1's, made once). A change on the live FM1 (the state's
-signature, `fm1_plugin.c tutti_sig`: the exported project and the flash's writes, checked every ~200 ms; not the host's
+signature, `fm1_plugin.c tutti_sig`: the exported project, the live session and the flash's writes, checked every ~200 ms; not the host's
 tempo, the transport, held notes) starts the next revision; `state-changed` follows once it has been still for 600 ms
 (at most every 2 s while it keeps changing). A revision's state is made once (one snapshot, whoever asks for it while
 it is made); renders take the state of the revision they ask for (the last 8 are kept). Device settings are written to

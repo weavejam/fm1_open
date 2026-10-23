@@ -47,7 +47,8 @@ export class FM1Engine {
     this.dirty = false;
     this.states.clear();
     this.making.clear();                               // (an earlier session's snapshot: dropped when it comes)
-    this.keep(1, { rev: 1, buf: state ? state.slice(0) : packState(st), state: st });   // (the input is never changed)
+    // (the input is never changed; an older version's state: given back as this version's)
+    this.keep(1, { rev: 1, buf: state && stateVersion === STATE_VERSION ? state.slice(0) : packState(st), state: st });
     if (mode === "edit" && this.live) await this.live.load(st, context);
     return { stateRevision: this.revision };
   }

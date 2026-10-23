@@ -2075,6 +2075,21 @@ __attribute__((cold, minsize)) int groove_timbre_apply(unsigned track, const str
     fm1_web_resume();
     return 0;
 }
+#ifdef FM1_TUTTI
+__attribute__((cold, minsize)) int fm1_tutti_play_row(unsigned t, const struct groove_project *p)
+{
+    if (t >= GROOVE_TRACKS || track_roles[t] != GROOVE_TRACK_PLAY || !p) return GROOVE_PROJECT_INVALID;
+    fm1_web_pause();
+    session_arp_apply(t, p->arp[t]);
+    unsigned solo = (p->solo >> t) & 1U, mute = ((p->mute >> t) & 1U) & !solo;
+    mute_mask = (mute_mask & ~(1U << t)) | mute << t;
+    solo_mask = (solo_mask & ~(1U << t)) | solo << t;
+    session_mix_refresh();
+    publish(t, 0);
+    fm1_web_resume();
+    return 0;
+}
+#endif
 /* Restore runs only on the control path; keep its allocation plan compact. */
 __attribute__((cold, minsize)) static int project_apply(const struct groove_project *p, unsigned operation)
 {

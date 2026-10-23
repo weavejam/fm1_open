@@ -47,5 +47,8 @@ extern unsigned fm1_tutti_capture;
 extern int32_t fm1_tutti_cap[GROOVE_TRACKS][4][FM1_BLOCK_FRAMES];
 /* 1: no metronome click (renders). */
 extern unsigned fm1_tutti_no_click;
+/* A PLAY track's live arpeggiator settings, mute and solo from a raw capture's row (groove_project_capture; the
+ * timbre: groove_timbre_apply). The state's live session (fm1_plugin.c tutti_session_apply). */
+int fm1_tutti_play_row(unsigned track, const struct groove_project *p);
 #endif
 #endif

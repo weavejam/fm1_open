@@ -10,7 +10,8 @@
 //   cmd          {id?, cmd: {type, ...}}: an operation (FM1Core.command's types); -> {type: reply, id, data | error}
 //   tutti-tempo  {bpm}: the host's tempo (fractional)
 //   tutti-play   {gen, playing, atFrame, beat, bpm}: the host's transport, listen-only: `beat` sounds at this context's
-//                frame `atFrame`; the same generation again: only a drift of over 20 ms moves it; not playing: stop
+//                frame `atFrame`; the same generation again: only a drift of over 20 ms moves it; a new one: the
+//                run before it stopped at once; not playing: stop
 //   snapshot     {id}: the state now (state.js deviceState) -> {type: snapshot, id, state, sig}
 //   steps        {id}: the pattern's length in sixteenths (fm1_plugin.c tutti_pattern_steps) -> {type: steps, id, steps}
 // and out: {type: ready, sig}, {type: frame, ...} (~20 a second), {type: sig, sig} when the state changed,
@@ -231,6 +232,9 @@ class FM1Tutti extends AudioWorkletProcessor {
       const want = m.beat + ((currentFrame + 128 - m.atFrame) / sampleRate) * m.bpm / 60;   // (heard a block on)
       const ours = this.c.tutti_live_pos() / 4;
       if (Math.abs(want - ours) * 60 / m.bpm <= DRIFT) return;
+    } else if (run) {                                  // a new run: the old one stops now, not at the new one's start
+      this.at = null;
+      this.c.tutti_live_stop();
     }
     this.play = { gen: m.gen, atFrame: m.atFrame, beat: m.beat, bpm: m.bpm };
   }

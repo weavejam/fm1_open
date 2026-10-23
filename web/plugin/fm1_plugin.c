@@ -280,10 +280,67 @@ EXPORT("tutti_live_pos") double tutti_live_pos(void)
     return base + fm1_tutti_phase() / period;
 }
 
+/* ------------------------------------------------------------------ the live session */
+/* What the exported project leaves out (it has a PLAY or OFF track's dormant arrangement row, not what plays): the
+ * raw capture (groove_project_capture: a PLAY track's live timbre, mix, sends, arpeggiator, mute and solo), each
+ * track's live tuning, the track roles and MIDI input channels as they are now (the flash has them only once the
+ * settings are written). In the state after the project (state.js, version 2); applied after its import */
+struct tutti_session {
+    struct groove_project live;
+    struct groove_tuning tuning[GROOVE_TRACKS];
+    uint8_t role[GROOVE_TRACKS], channel[GROOVE_TRACKS];
+};
+_Static_assert(sizeof(struct tutti_session) == 4272, "the state's session layout (state.js SESSION_BYTES)");
+static struct tutti_session tt_session;
+EXPORT("tutti_session") uint8_t *tutti_session(void) { return (uint8_t *)&tt_session; }
+EXPORT("tutti_session_bytes") unsigned tutti_session_bytes(void) { return sizeof tt_session; }
+EXPORT("tutti_session_capture") int tutti_session_capture(void)
+{
+    memset(&tt_session, 0, sizeof tt_session);
+    int r = groove_project_capture(&tt_session.live);
+    if (!r) r = groove_tuning_capture(tt_session.tuning);
+    for (unsigned t = 0; t < GROOVE_TRACKS; ++t) {
+        tt_session.role[t] = (uint8_t)groove_track_role(t);
+        tt_session.channel[t] = (uint8_t)groove_midi_input_channel(t);
+    }
+    return r;
+}
+/* after the project's import: the roles and channels, then each PLAY track as it played. 0, or nothing usable */
+EXPORT("tutti_session_apply") int tutti_session_apply(void)
+{
+    const struct tutti_session *s = &tt_session;
+    if (!groove_project_valid(&s->live) || memchr(s->tuning, 0x80, sizeof s->tuning)) return GROOVE_PROJECT_INVALID;
+    for (unsigned t = 0; t < GROOVE_TRACKS; ++t)
+        if (s->role[t] > GROOVE_TRACK_OFF || s->channel[t] > 15u) return GROOVE_PROJECT_INVALID;
+    for (unsigned t = 0; t < GROOVE_TRACKS; ++t) {
+        int r = groove_track_role_set(t, s->role[t]);
+        if (!r) r = groove_midi_input_set(t, s->channel[t]);
+        if (r) return r;
+    }
+    for (unsigned t = 0; t < GROOVE_TRACKS; ++t)
+        if (s->role[t] == GROOVE_TRACK_PLAY) {
+            int r = groove_timbre_apply(t, &s->live);
+            if (!r) r = fm1_tutti_play_row(t, &s->live);
+            if (!r) r = groove_tuning_set(t, &s->tuning[t]);
+            if (r) return r;
+        }
+    return 0;
+}
+/* the session's edits, as the panel's track settings page (screen.c) and its arpeggiator page make them: for the tests */
+EXPORT("tutti_track_setting") int tutti_track_setting(unsigned track, unsigned parameter, int delta)
+{
+    return groove_settings_track(track, parameter, delta);
+}
+EXPORT("tutti_arp_edit") void tutti_arp_edit(unsigned track, unsigned parameter, int delta)
+{
+    groove_arp_edit(track, parameter, delta);
+}
+
 /* ------------------------------------------------------------------ the state's signature */
 /* what the state is (a change: a new revision): the working project as exported (the pattern, the sounds, the mix,
- * the effects, the tuning) and the flash's writes (saved projects, settings, the sample bank, the DX7 library). Not
- * the host's tempo, the transport, held notes */
+ * the effects, the tuning), the live session (tutti_session: PLAY tracks as they play, roles, channels) and the
+ * flash's writes (saved projects, settings, the sample bank, the DX7 library). Not the host's tempo, the transport,
+ * held notes */
 extern uint32_t sim_flash_revision(void);
 static uint32_t sig_mix(uint32_t h, const uint8_t *p, unsigned n)
 {
@@ -294,5 +351,6 @@ EXPORT("tutti_sig") uint32_t tutti_sig(void)
 {
     uint32_t h = 2166136261u, rev = sim_flash_revision();
     if (!sim_export()) h = sig_mix(h, sim_file(), GROOVE_PROJECT_TUNED_BYTES);
+    if (!tutti_session_capture()) h = sig_mix(h, (const uint8_t *)&tt_session, sizeof tt_session);
     return sig_mix(h, (const uint8_t *)&rev, sizeof rev);
 }

@@ -473,7 +473,7 @@ if (!FAST) {
   let bad = 0;
   for (const b of [new ArrayBuffer(3), new Uint8Array(20).buffer, buf.slice(0, buf.byteLength - 1)])
     try { unpackState(b); } catch (e) { if (e.code === "state-incompatible") bad++; }
-  try { unpackState(buf, 2); } catch (e) { if (e.code === "state-incompatible") bad++; }
+  try { unpackState(buf, 3); } catch (e) { if (e.code === "state-incompatible") bad++; }
   check("state: short, foreign, truncated and other-version states refused (state-incompatible)", bad === 4);
   const f2 = await Dev.make(back), s2 = f2.state();
   const flashSame = (() => { const a = d.flash(), b = f2.flash(); return a.every((x, i) => x === b[i]); })();
@@ -489,6 +489,76 @@ if (!FAST) {
         peak(withUser) > 0.01 && !same(withUser, withDemo));
   const tuned = (st) => renderAll(st, req({ input: { ...NOTHING, notes: [{ beat: 0, lengthBeats: 1, pitch: 64, velocity: 110, channel: 0 }] }, outputs: ["t1"], toBeat: 2 }));
   check("the tuning plays from the state (T1's E 14 cents flat: not the 12-TET note)", !same((await tuned(s)).out.t1[0], (await tuned(groove)).out.t1[0]));
+}
+
+// ---- PLAY tracks as they play are in the state (the live session, state.js version 2): a PLAY track's timbre, its
+// arpeggiator, its tuning (what the exported project leaves out: it has the dormant arrangement rows) come back in a
+// fresh FM1 and a use-B render sounds them; version 1 states still read
+const timbreEdit = (d) => {                            // (the selected track's timbre, as the page's timbre import: another algorithm)
+  if (d.ex.sim_timbre_export()) throw new Error("timbre export");
+  const t = new Uint8Array(d.ex.memory.buffer, d.ex.sim_file(), 223).slice();
+  t[11 + 134] = (t[11 + 134] + 7) % 32;
+  t[11 + 135] = 7;
+  d.file(t);
+  return d.ex.sim_timbre_import();
+};
+const playOn = (d, t = 0) => d.ex.tutti_track_setting(t, 0, 1);   // (the track settings page: role NORMAL -> PLAY)
+const roleOf = (d, t) => { d.ex.tutti_session_capture(); return new Uint8Array(d.ex.memory.buffer, d.ex.tutti_session(), 4272)[4256 + t]; };
+const useB = (st, pitch = 60, beats = 1) => renderAll(st, req({ input: { ...NOTHING, notes: [{ beat: 0, lengthBeats: beats, pitch, velocity: 110, channel: 0 }] }, outputs: ["t1"], toBeat: 2 }));
+// a version 1 state (no session): what the plugin wrote before
+const packV1 = (st) => {
+  const v2 = new Uint8Array(packState({ ...st, session: null })), dv = new DataView(v2.buffer), ml = dv.getUint32(8, true), s0 = 12 + ml + 4 + PROJECT_BYTES;
+  const v1 = new Uint8Array(v2.length - 4);
+  v1.set(v2.subarray(0, s0));
+  v1.set(v2.subarray(s0 + 4), s0);
+  new DataView(v1.buffer).setUint32(4, 1, true);
+  return v1.buffer;
+};
+{
+  const d = await Dev.make();
+  d.run(200);
+  const sig0 = d.ex.tutti_sig();
+  playOn(d);
+  const sig1 = d.ex.tutti_sig(), played = d.state();
+  const ti = timbreEdit(d);
+  const sig2 = d.ex.tutti_sig(), edited = d.state();
+  check(`a PLAY track's timbre edited (import ${ti}): the exported project the same (its dormant row), the state's signature changes (role ${sig0 !== sig1}, timbre ${sig1 !== sig2})`,
+        ti === 0 && roleOf(d, 0) === 1 && same(played.project, edited.project) && sig0 !== sig1 && sig1 !== sig2);
+  const back = await Dev.make(unpackState(packState(edited)));
+  back.run(2500);                                      // (past the settings' own restore and write)
+  const tOf = (x) => { x.ex.sim_timbre_export(); return new Uint8Array(x.ex.memory.buffer, x.ex.sim_file(), 223).slice(); };
+  check("a fresh FM1 from that state: T1 still PLAY, its timbre the edited one (the role not yet written to the flash: from the session)",
+        roleOf(back, 0) === 1 && same(tOf(back), tOf(d)));
+  const a = (await useB(played)).out.t1[0], b = (await useB(edited)).out.t1[0], c = (await useB({ ...edited, session: null })).out.t1[0];
+  check(`use B on channel 0 sounds the edited timbre (peak ${peak(b).toFixed(3)}; the default's ${peak(a).toFixed(3)}: not the same; without the session: the default's)`,
+        peak(b) > 0.01 && !same(a, b) && same(a, c));
+  // the arpeggiator: T1 PLAY with its arpeggiator on, then a project without one loaded (the dormant row: off), a rate edited
+  const e = await Dev.make();
+  e.load(new Project(base.b).clear().arp(0, { on: 1, rate: 2 }));
+  playOn(e);
+  e.load(new Project(base.b).clear());
+  const s0 = e.ex.tutti_sig();
+  e.ex.tutti_arp_edit(0, 0, 1);
+  const arpSt = e.state(), s1 = e.ex.tutti_sig(), arpBack = await Dev.make(unpackState(packState(arpSt)));
+  const on = (await useB(arpSt, 60, 2)).out.t1[0], plain = (await useB({ ...arpSt, session: null }, 60, 2)).out.t1[0];
+  check(`a PLAY track's arpeggiator (on, rate edited: signature changes ${s0 !== s1}) back in a fresh FM1 (${(arpBack.ex.sim_arp(0) >> 8).toString(2)} = ${(e.ex.sim_arp(0) >> 8).toString(2)}), its use-B render arpeggiated, not the dormant row's`,
+        s0 !== s1 && (e.ex.sim_arp(0) >> 8) & 1 && arpBack.ex.sim_arp(0) >> 8 === e.ex.sim_arp(0) >> 8 && !same(on, plain) && peak(on) > 0.01);
+  // the tuning: T1 PLAY tuned, then a project without tuning loaded (the dormant row: 12-TET)
+  const f = await Dev.make();
+  f.load(grooveProject().tuning(0, [0, 0, 0, 0, -40, 0, 0, 0, 0, 0, 0, 0, ...Array(12).fill(0)]));
+  playOn(f);
+  const t0 = f.ex.tutti_sig();
+  f.load(grooveProject());
+  const tuneSt = f.state();
+  const tuned = (await useB(tuneSt, 64)).out.t1[0], flat = (await useB(groove, 64)).out.t1[0], lost = (await useB({ ...tuneSt, session: null }, 64)).out.t1[0];
+  const dormantTet = new Int8Array(tuneSt.project.buffer, tuneSt.project.byteOffset + 4068, 24)[4] === 0;
+  check(`a PLAY track's tuning (E 40 cents flat) in the state though the project's row is 12-TET (${dormantTet}): its use-B render tuned, without the session not`,
+        dormantTet && t0 !== f.ex.tutti_sig() && !same(tuned, flat) && same(lost, flat));
+  // version 1
+  const v1 = packV1(edited), u1 = unpackState(v1, 1);
+  const fromV1 = await Dev.make(u1);
+  check("a version 1 state (no session) reads: the project and the flash as they were, no session",
+        u1.session === null && same(u1.project, edited.project) && Object.keys(edited.sectors).every((k) => same(u1.sectors[k], edited.sectors[k])) && !!fromV1);
 }
 
 // ================================================================== the protocol (a fake host)
@@ -646,7 +716,7 @@ const settled = async (h, id) => {
   broken.project[4260] ^= 0xFF;                        // (the tuning tail's CRC: sim_import refuses the project)
   const h5 = harness();
   h5.connect();
-  h5.send({ type: "init", id: "i7", sampleRate: 44100, context: ctxOf(120), state: packState(broken), stateVersion: 1, mode: "edit" });
+  h5.send({ type: "init", id: "i7", sampleRate: 44100, context: ctxOf(120), state: packState(broken), stateVersion: STATE_VERSION, mode: "edit" });
   const i7 = await h5.reply("i7");
   h5.close();
   check(`init with a foreign state, an unread version, a project the device cannot load: state-incompatible (${i5.code} ${i6.code} ${i7.code})`,
@@ -658,7 +728,7 @@ const settled = async (h, id) => {
 {
   const h = harness();
   h.connect();
-  h.send({ type: "init", id: "i", sampleRate: 44100, context: ctxOf(123.45), state: packState(groove), stateVersion: 1, mode: "render" });
+  h.send({ type: "init", id: "i", sampleRate: 44100, context: ctxOf(123.45), state: packState(groove), stateVersion: STATE_VERSION, mode: "render" });
   const rev = (await h.reply("i")).stateRevision;
   h.send({ type: "render", id: "c1", ...req({ renderId: "c1", stateRevision: rev, context: ctxOf(123.45), toBeat: 40, outputs: ALL }) });
   await until(() => h.chunks("c1") >= INITIAL_CREDITS);
@@ -1012,6 +1082,146 @@ const settled = async (h, id) => {
         has && h.session.state === "closed" && !!r && r.cancel === true && h.session.render === null && h.session.port === null &&
         !port.onmessage && !port.onmessageerror && h.connect({ generation: 2 }) === 1);
   h.close();
+}
+
+// ---- a PLAY track's edit through the session: a new revision; get-state, a fresh init, a use-B render sounds it
+{
+  const live = new NodeLive();
+  const h = harness({ live });
+  h.connect();
+  h.send({ type: "init", id: "i", sampleRate: 44100, context: ctxOf(120), state: null, stateVersion: null, mode: "edit" });
+  await h.reply("i");
+  live.edit((d) => playOn(d));
+  const r1 = (await h.wait((m) => m.type === "state-changed", 5000)).stateRevision;
+  h.send({ type: "get-state", id: "g1" });
+  const g1 = await h.reply("g1");
+  live.edit((d) => timbreEdit(d));
+  const r2 = (await h.wait((m) => m.type === "state-changed", 5000)).stateRevision;
+  h.send({ type: "get-state", id: "g2" });
+  const g2 = await h.reply("g2");
+  const h2 = harness();
+  h2.connect();
+  h2.send({ type: "init", id: "j", sampleRate: 44100, context: ctxOf(120), state: g2.state, stateVersion: g2.stateVersion, mode: "render" });
+  const j = await h2.reply("j");
+  const note = { input: { ...NOTHING, notes: [{ beat: 0, lengthBeats: 1, pitch: 60, velocity: 110, channel: 0 }] }, outputs: ["t1"], toBeat: 2 };
+  const chunks = collect(h2, "b1");
+  h2.send({ type: "render", id: "b1", ...req({ renderId: "b1", stateRevision: j.stateRevision, ...note }) });
+  await h2.reply("b1");
+  const cat = (cs) => { const a = new Float32Array(cs.reduce((n, c) => n + c.channels[0].length, 0)); let k = 0; for (const c of cs) { a.set(c.channels[0], k); k += c.channels[0].length; } return a; };
+  const heard = cat(chunks), dflt = (await renderAll(unpackState(g1.state, g1.stateVersion), req(note))).out.t1[0];
+  check(`a PLAY track's timbre edited live: revision ${r1} -> ${r2}; get-state, init in a fresh session, use B on channel 0: the edited timbre, not the default's`,
+        r2 === r1 + 1 && g2.stateRevision === r2 && g2.stateVersion === STATE_VERSION && j.type === "init:ok" && peak(heard) > 0.01 &&
+        !same(heard, dflt) && same(heard, (await useB(live.dev.state())).out.t1[0]));
+  h.close(); h2.close();
+}
+
+// ---- a version 1 state given to init: read, given back as this version's
+{
+  const h = harness();
+  h.connect();
+  h.send({ type: "init", id: "i", sampleRate: 44100, context: ctxOf(120), state: packV1(groove), stateVersion: 1, mode: "render" });
+  const i = await h.reply("i");
+  h.send({ type: "get-state", id: "g" });
+  const g = await h.reply("g");
+  const back = unpackState(g.state, g.stateVersion);
+  check(`init with a version 1 state: ${i.type}; get-state gives version ${g.stateVersion}, the same project and flash`,
+        i.type === "init:ok" && g.stateVersion === STATE_VERSION && same(back.project, groove.project) &&
+        Object.keys(groove.sectors).length === Object.keys(back.sectors).length && Object.keys(groove.sectors).every((k) => same(groove.sectors[k], back.sectors[k])));
+  h.close();
+}
+
+// ---- the signature: every edit that changes the state changes it; what the state does not keep leaves it
+{
+  const d = await Dev.make(groove, { hosted: true });
+  d.run(300);
+  const edits = {
+    "a step": (x) => x.ex.sim_step(6, 1),
+    "a PLAY role": (x) => playOn(x, 0),
+    "a PLAY track's timbre": (x) => timbreEdit(x),
+    "a PLAY track's arpeggiator": (x) => x.ex.tutti_arp_edit(0, 1, 1),
+    "an input channel": (x) => x.ex.tutti_track_setting(0, 1, 3),
+    "an OFF role": (x) => x.ex.tutti_track_setting(2, 0, 2),
+    "the DX7 library": (x) => { x.ex.sim_library_read(2); const b = new Uint8Array(x.ex.memory.buffer, x.ex.sim_file(), 4096).slice(); b[5] ^= 1; x.file(b); x.ex.sim_library_write(2); },
+    "a MIDI setting (written 1.5 s on)": (x) => { x.ex.sim_midi_edit(3, 1, 2); x.run(1700); },
+  };
+  const unchanged = [];
+  for (const [what, fn] of Object.entries(edits)) {
+    const s = d.ex.tutti_sig();
+    fn(d);
+    d.run(50);
+    if (d.ex.tutti_sig() === s) unchanged.push(what);
+  }
+  check(`the signature: every edit changes it (${Object.keys(edits).join(", ")}; unchanged: ${unchanged.join(", ") || "none"})`, unchanged.length === 0);
+  d.run(1700);
+  const s = d.ex.tutti_sig();
+  d.ex.tutti_tempo(133);
+  d.ex.tutti_live_play(0);
+  d.run(400);
+  d.file(Uint8Array.of(0x90, 60, 100)); d.ex.sim_midi(3);
+  d.run(100);
+  d.file(Uint8Array.of(0x80, 60, 0)); d.ex.sim_midi(3);
+  d.ex.tutti_live_stop();
+  d.run(100);
+  check("the signature: the host's tempo, the transport, notes played leave it", d.ex.tutti_sig() === s);
+}
+
+// ---- the page's worklet (worklet-tutti.js) in Node: the host's transport and its generations; its sig messages
+{
+  let proc = null;
+  globalThis.sampleRate = 44100;
+  globalThis.currentFrame = 0;
+  globalThis.AudioWorkletProcessor = class { constructor() { this.port = { sent: [], postMessage(m) { this.sent.push(m); } }; } };
+  globalThis.registerProcessor = (name, C) => { proc = new C(); };
+  await import(pathToFileURL(path.join(ROOT, "web/plugin/worklet-tutti.js")).href);
+  const out = [[new Float32Array(128), new Float32Array(128)]];
+  const run = (ms) => { for (let k = 0; k < ms * 44.1; k += 128) { proc.process([], out); globalThis.currentFrame += 128; } };
+  await proc.onMessage({ type: "load", wasm: fs.readFileSync(wasmPath), state: groove, hosted: true, knob: 1023 });
+  const c = proc.c, now = () => globalThis.currentFrame;
+  await proc.onMessage({ type: "tutti-tempo", bpm: 120 });
+  await proc.onMessage({ type: "tutti-play", gen: 1, playing: true, atFrame: now(), beat: 8, bpm: 120 });
+  run(500);
+  const p1 = c.tutti_live_pos();
+  // a new generation starting in a second at beat 0: the old run stops now (not at the new start), one start
+  await proc.onMessage({ type: "tutti-play", gen: 2, playing: true, atFrame: now() + 44100, beat: 0, bpm: 120 });
+  const stopped = c.tutti_playing();
+  run(900);
+  const between = c.tutti_playing();
+  run(300);
+  const pos = c.tutti_live_pos();
+  check(`worklet: a new generation stops the old run at once (playing: ${stopped}, ${between} until its start), then plays from its beat (${p1.toFixed(2)} -> ${pos.toFixed(2)} sixteenths, 0.2 s in: ~1.6)`,
+        p1 > 33 && stopped === 0 && between === 0 && c.tutti_playing() === 1 && Math.abs(pos - 1.6) < 0.2);
+  // the same generation again, on time: it continues; a pre-roll's generation (beat < 0): the old run stops at once,
+  // nothing until beat 0
+  await proc.onMessage({ type: "tutti-play", gen: 2, playing: true, atFrame: now(), beat: (c.tutti_live_pos() + 128 / 44100 * 8) / 4, bpm: 120 });
+  run(250);
+  const cont = c.tutti_live_pos();
+  await proc.onMessage({ type: "tutti-play", gen: 3, playing: true, atFrame: now(), beat: -1, bpm: 120 });
+  const pre = c.tutti_playing();
+  run(400);
+  const preIn = c.tutti_playing();
+  run(200);
+  check(`worklet: the same generation on time continues (${cont.toFixed(2)}, ~3.6); a pre-roll's generation: the old run stopped at once (${pre}, ${preIn} in it), started at beat 0 (${c.tutti_live_pos().toFixed(2)} sixteenths 0.1 s on, ~0.8)`,
+        Math.abs(cont - 3.6) < 0.2 && pre === 0 && preIn === 0 && Math.abs(c.tutti_live_pos() - 0.8) < 0.2);
+  await proc.onMessage({ type: "tutti-play", gen: 3, playing: false });
+  // the signature: an edit (a page command, a role set on the device) posted as a sig within ~200 ms
+  const sigs = () => proc.port.sent.filter((m) => m.type === "sig").length;
+  run(300);
+  const n0 = sigs();
+  run(300);
+  const idle = sigs() - n0;
+  await proc.onMessage({ type: "cmd", id: 1, cmd: { type: "step", index: 2, toggle: true } });
+  run(300);
+  const n1 = sigs();
+  c.tutti_track_setting(0, 0, 1);
+  run(300);
+  const n2 = sigs();
+  c.sim_timbre_export();
+  const t = new Uint8Array(c.memory.buffer, c.sim_file(), 223).slice();
+  t[11 + 134] = (t[11 + 134] + 5) % 32;
+  await proc.onMessage({ type: "cmd", id: 2, cmd: { type: "import", timbre: true, data: t } });
+  run(300);
+  check(`worklet: no edit, no sig (${idle}); a step, a PLAY role, a PLAY track's timbre import: a sig each (${n1 - n0 - idle}, ${n2 - n1}, ${sigs() - n2})`,
+        idle === 0 && n1 - n0 === 1 && n2 - n1 === 1 && sigs() - n2 === 1);
 }
 
 console.log(fails ? `plugin: ${fails} FAILED` : "plugin: all ok");
