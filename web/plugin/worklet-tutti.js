@@ -225,7 +225,7 @@ class FM1Tutti extends AudioWorkletProcessor {
     }
     const run = this.at;
     if (run && run.gen === m.gen) {                    // still the same run: only a drift moves it
-      const want = m.beat + ((currentFrame - m.atFrame) / sampleRate) * m.bpm / 60;
+      const want = m.beat + ((currentFrame + 128 - m.atFrame) / sampleRate) * m.bpm / 60;   // (heard a block on)
       const ours = this.c.tutti_live_pos() / 4;
       if (Math.abs(want - ours) * 60 / m.bpm <= DRIFT) return;
     }
@@ -248,7 +248,8 @@ class FM1Tutti extends AudioWorkletProcessor {
     let at = 0;
     while (at < n) {
       if (!this.out || this.pos >= 128) {
-        this.out = new Float32Array(c.memory.buffer, c.sim_render(), 256);
+        const ptr = c.sim_render();                    // (always the same block: a view made again only when needed)
+        if (!this.out || this.out.buffer !== c.memory.buffer || this.out.byteOffset !== ptr) this.out = new Float32Array(c.memory.buffer, ptr, 256);
         this.pos = 0;
       }
       if (this.out.buffer !== c.memory.buffer) this.out = new Float32Array(c.memory.buffer, this.out.byteOffset, 256);

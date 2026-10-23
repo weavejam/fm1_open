@@ -65,7 +65,7 @@ $("tt-source-link").href = BUILD.source;
 $("tt-source-link").title = BUILD.source;               // (as text too: tuttidaw's frame opens no popups)
 
 // ------------------------------------------------------------------ the live FM1 (edit mode, standalone)
-let ac = null, node = null, wasmBytes = null, wasmModule = null, ready = false, loads = 0, sigBase = null, seq = 0;
+let projectName = null, ac = null, node = null, wasmBytes = null, wasmModule = null, ready = false, loads = 0, sigBase = null, seq = 0;
 const waits = new Map();
 const status = window.fm1Plugin = { ready: false, sig: 0, frames: 0 };   // (what the page's FM1 does, to look at)
 const post = (m, transfer) => { if (node) node.port.postMessage(m, transfer || []); };
@@ -97,6 +97,7 @@ function onNode(e) {
   const m = e.data;
   if (m.type === "frame") {
     status.frames++;
+    if (m.workspace) projectName = m.workspace.name;
     device.receive(m);
     panel.receive(m);
     const playing = status.playing = !!m.state[14];
@@ -178,7 +179,7 @@ const live = {
     const first = !node.loaded;
     node.loaded = true;
     post({ type: "load", wasm: first ? wasmBytes.slice(0) : null, state, hosted, knob: 1023 });
-    if (ac.state !== "running") { try { await ac.resume(); } catch {} }
+    if (ac.state !== "running") ac.resume().then(audioState, () => {});   // (not awaited: init never waits for a gesture)
     ac.onstatechange = audioState;
     audioState();
   },
@@ -322,6 +323,7 @@ const engine = new FM1Engine({
   blank,
   live,
   onChanged: (rev) => session.stateChanged(rev),
+  name: () => (hosted && projectName) || null,          // (get-state summary: the project's name)
 });
 const session = new PluginSession({
   engine,
