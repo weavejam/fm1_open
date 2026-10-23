@@ -9,7 +9,8 @@
 // (render-worker.js) or Node (tests).
 //   mix        the device's output, as FM1 Open makes it (the eight tracks, the reverb and delay buses, the master
 //              limiter, the output level at MASTER's top)
-//   t1 .. t8   a track's stem: its share of the mix and its own share of the buses (README "Stems")
+//   t1 .. t5, t67, t8   a track's stem: its share of the mix and its own share of the buses (README "Stems"); t67 is
+//              T6 and T7 together (protocol v0 allows 8 outputs, the mix among them; a new FM1 mutes T6 and T7)
 // 44.1 kHz is the engine's rate; 48 kHz through resample.js.
 import { Resampler } from "./resample.js";
 import { bootDevice } from "./state.js";
@@ -17,8 +18,9 @@ import { bootDevice } from "./state.js";
 export const NATIVE_RATE = 44100;
 export const SAMPLE_RATES = [44100, 48000];
 export const TRACKS = 8;
+export const STEMS = { t1: [0], t2: [1], t3: [2], t4: [3], t5: [4], t67: [5, 6], t8: [7] };   // output -> tracks
 export const OUTPUTS = [{ id: "mix", name: "Mix", channels: 2 },
-  ...Array.from({ length: TRACKS }, (_, i) => ({ id: `t${i + 1}`, name: `Track ${i + 1}`, channels: 2 }))];
+  ...Object.entries(STEMS).map(([id, t]) => ({ id, name: t.length > 1 ? `Tracks ${t.map((x) => x + 1).join(" + ")}` : `Track ${t[0] + 1}`, channels: 2 }))];
 export const MAX_SECONDS = 600, MAX_TAIL_MS = 10000;
 // every render plays from beat 0 (no seek): the frames before fromBeat are work too (protocol 6 counts the pre-roll in
 // a render's length). At most the budget of a result plus its longest tail, at the render's tempo: a render's whole
@@ -199,7 +201,7 @@ export async function render(module, state, req, sink, opts = {}) {
   const chunkFrames = opts.chunkFrames || rate;
   const main = await device(module, state, plan.bpm);
   const stems = [];
-  for (const o of outputs) if (o !== "mix") stems.push({ track: +o.slice(1) - 1, ex: await device(module, state, plan.bpm) });
+  for (const o of outputs) if (o !== "mix") stems.push({ id: o, tracks: STEMS[o], ex: await device(module, state, plan.bpm) });
   if (plan.events) {
     // use B (protocol 7b): only the host's MIDI plays; the sequencer never starts (tutti_event takes no realtime
     // messages, so the MIDI cannot start it either); every track a PLAY track on its own channel, ARP HOLD off
@@ -216,7 +218,7 @@ export async function render(module, state, req, sink, opts = {}) {
   const need = LAT + (resampled ? Resampler.inputFor(skip + frames) : skip + frames);
   const room = chunkFrames + 2 * MAXB * B;              // a stream's result frames not out yet, at most
   const streams = outputs.map((id) => ({
-    id, stem: id === "mix" ? null : stems.find((s) => s.track === +id.slice(1) - 1), rs: resampled ? new Resampler(skip) : null,
+    id, stem: id === "mix" ? null : stems.find((s) => s.id === id), rs: resampled ? new Resampler(skip) : null,
     l: new Float32Array(room), r: new Float32Array(room), n: 0,
   }));
   let made = 0, done = 0, lastYield = Date.now();      // 44.1 kHz device frames rendered; result frames out
@@ -231,7 +233,12 @@ export async function render(module, state, req, sink, opts = {}) {
         let ex = main, l = main.tutti_out_l(), r = main.tutti_out_r();
         if (s.stem) {                                   // the track's share through its own buses
           ex = s.stem.ex;
-          new Int32Array(ex.memory.buffer, ex.tutti_bus_in(), n * 4).set(new Int32Array(main.memory.buffer, main.tutti_cap(s.stem.track), n * 4));
+          const bus = new Int32Array(ex.memory.buffer, ex.tutti_bus_in(), n * 4);   // (blocks of 4 x B: L R reverb delay)
+          bus.set(new Int32Array(main.memory.buffer, main.tutti_cap(s.stem.tracks[0]), n * 4));
+          for (const t of s.stem.tracks.slice(1)) {        // (two tracks' shares summed, saturated as the mix's buses)
+            const more = new Int32Array(main.memory.buffer, main.tutti_cap(t), n * 4);
+            for (let i = 0; i < bus.length; i++) bus[i] = Math.max(-2147483648, Math.min(2147483647, bus[i] + more[i]));
+          }
           new Int32Array(ex.memory.buffer, ex.tutti_gain_in(), nb * 2).set(gains);
           ex.tutti_stem_render(nb);
           l = ex.tutti_stem_l();

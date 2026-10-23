@@ -58,6 +58,13 @@ EXPORT("tutti_tempo") unsigned tutti_tempo(double bpm)
     return 1;
 }
 
+/* the clock units a block advances (sequencer.c: tempo x 4 a frame) */
+static uint32_t block_units(void)
+{
+    return fm1_tutti_bpm_q32 ? (uint32_t)((fm1_tutti_bpm_q32 * (4u * FM1_BLOCK_FRAMES)) >> 32)
+                             : groove_tempo_saved() * 4u * FM1_BLOCK_FRAMES;
+}
+
 /* ------------------------------------------------------------------ what the pattern takes */
 static unsigned gcd(unsigned a, unsigned b) { while (b) { unsigned t = a % b; a = b; b = t; } return a; }
 /* sixteenths until the whole pattern repeats: the least common multiple of the lengths (16, 32, 48 or 64 steps) of
@@ -96,7 +103,11 @@ EXPORT("tutti_settle") void tutti_settle(void)
  * nearest to frame `stop` (toBeat: the notes let go there, the tail only rings out; ~0u: never) */
 EXPORT("tutti_start") void tutti_start(uint32_t stop)
 {
+    /* half a block of clock units ahead: a step sounds at the block start nearest to its time (within 64 frames), not
+     * the next one (0 .. 127 frames late, as on the FM1); step 0 at frame 0 all the same */
+    fm1_tutti_start_phase = (uint32_t)((block_units() + 1u) / 2u);
     send3(0xfa, 0, 0);
+    fm1_tutti_start_phase = 0;
     tt_stop = stop;
     tt_frame = 0;
 }
@@ -253,7 +264,7 @@ EXPORT("tutti_live_play") void tutti_live_play(double sixteenths)
     double pairs = (double)(uint64_t)(units / pair), into = units - pairs * pair;
     uint32_t ticks = (uint32_t)pairs * 2u;
     if (into >= even) { ticks++; into -= even; }
-    fm1_tutti_locate(ticks, (uint32_t)into);
+    fm1_tutti_locate(ticks, (uint32_t)into, into < (double)block_units());   /* (a step just begun: it sounds) */
 }
 EXPORT("tutti_live_stop") void tutti_live_stop(void)
 {

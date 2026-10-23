@@ -36,8 +36,11 @@ extern unsigned fm1_tutti_clock_internal;
 /* Sequencer ticks (sixteenths) since the transport started, and the phase in clock units (for tests). */
 extern uint32_t fm1_tutti_ticks;
 uint32_t fm1_tutti_phase(void);
-/* Place the running transport at tick `ticks`, `phase` clock units into it (the live preview's seek). */
-void fm1_tutti_locate(uint32_t ticks, uint32_t phase);
+/* Place the running transport at tick `ticks`, `phase` clock units into it (the live preview's seek); `arm`: the
+ * step at `ticks` sounds with the next block (placed just past its start). */
+void fm1_tutti_locate(uint32_t ticks, uint32_t phase, unsigned arm);
+/* The clock's phase at a transport start (renders: half a block, so steps take the nearest block start). */
+extern uint32_t fm1_tutti_start_phase;
 /* 1: each track's share of the mix is captured per block (fm1_tutti_cap: dry left, dry right, reverb send, delay
  * send, after the track's gain, pan, mute and LFO), the mix itself unchanged. */
 extern unsigned fm1_tutti_capture;

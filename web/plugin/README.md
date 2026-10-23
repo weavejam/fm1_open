@@ -3,7 +3,7 @@
 weavejam's plugin build of [FM1 Open](https://github.com/m-vave/fm1_open) for [tuttidaw](https://tuttidaw.com) (protocol
 `tutti-plugin/0`, an "L0 offline plugin"): FM1 Open's own browser engine (the code of its workbench's simulator) as a
 device in the page with the workbench's panel around it, and a headless renderer that renders the working project's
-pattern, or MIDI from tuttidaw through the eight tracks, offline into a mix and eight stems, at tuttidaw's tempo.
+pattern, or MIDI from tuttidaw through the eight tracks, offline into a mix and seven stems (T1 .. T5, T6 + T7, T8), at tuttidaw's tempo.
 **Unofficial plugin build of M-VAVE's open-source FM1 Open firmware by weavejam. Not affiliated with or endorsed by
 M-VAVE.** "M-VAVE" and "FM1" name what it is compatible with; no M-VAVE logo is used. The plugin's own code is
 GPL-3.0-only; FM1 Open's sources keep their licences (LICENSE.md: GPL-3.0-only with the FM1 SDK linking exception;
@@ -110,9 +110,10 @@ checks' screenshots).
   FM1 in the page, no audio, only renders.
 - **Render to tuttidaw** sends `commit` with `fromBeat` 0, `toBeat` and `lengthBeats` (protocol 4b) = one pass of the
   pattern: until every track's loop meets again (the least common multiple of the tracks' lengths of 16, 32, 48 or 64
-  steps: 4 .. 48 beats), and the outputs (the mix, or the mix and T1..T8).
+  steps: 4 .. 48 beats), and the outputs (the mix, or the mix and the seven stems).
 - **Tempo while hosted.** The host's tempo is a runtime value: the project's tempo (in the state; the screen's BPM, TAP)
-  stays as it was, so tuttidaw's tempo never changes the state or starts a new revision.
+  stays as it was, so tuttidaw's tempo never changes the state or starts a new revision. Opened by itself the page sets
+  no tempo: FM1 Open plays its project's.
 - **The clock while hosted.** FM1 Open can follow an external MIDI clock (SEQ > SYNC / LOOP, a device setting). Hosted
   (and in every render) the clock is kept internal, as a runtime override (`fm1_tutti_clock_internal`, the
   `groove_clock_set` hook): the host's tempo drives it; the saved setting stays the user's (the state keeps it).
@@ -146,7 +147,9 @@ source hash.
   right after its gain, pan, mute / solo and LFO, and its reverb and delay sends. The mix is computed as before: bit for
   bit the same with or without capture (tested).
 - **No click in a render** (`fm1_tutti_no_click`: a project with the metronome always on renders without it).
-- **The preview's place** (`fm1_tutti_locate`): the running transport put at a sixteenth and a phase at once, every
+- **The preview's place** (`fm1_tutti_locate`): the running transport put at a sixteenth and a phase at once (a step
+  just begun, within a block, sounds with the next block: a preview started on beat 0 or a loop's start has its
+  downbeat), every
   track at its own loop position.
 
 ## Stems and the mix
@@ -155,7 +158,11 @@ source hash.
   (`web/engine/effects.c`), the bus output, the block-level master limiter (`web/synth/mixer.c
   fm1_master_process128`), the output level at MASTER's top (`app/audio_output.c`; the page's volume is the live FM1's
   only). The metronome's click is never in a render.
-- `t1` .. `t8` are each track's share of the mix plus **its own share of the buses**: in an instance of its own (booted
+- **Seven stems, not eight.** Protocol v0 allows 8 outputs at most, the mix among them (section 1 and 6), and FM1 Open
+  has eight tracks: `t1` .. `t5` and `t8` are one track each, `t67` is T6 and T7 together (their shares summed before
+  the buses). T6 and T7 are the ones a new FM1 mutes; T8 is the 808 by default. (A protocol question in the pull
+  request: more outputs in a later version.)
+- `t1` .. `t5`, `t67`, `t8` are each track's share of the mix plus **its own share of the buses**: in an instance of its own (booted
   with the same state at the same tempo, so its reverb and delay are set as the mix's), the track's sends go through
   that instance's reverb and delay (`fm1_fx_render`), added to the track's dry share, then the bus output, **the mix's
   limiter gain** of that block (so a stem is as loud as its track is in the limited mix: Felucca's `tutti_stem_render`
@@ -164,16 +171,19 @@ source hash.
   time, the mix's sums saturate where a stem's alone do not). With one track playing its stem is the mix bit for bit;
   with the test groove (six tracks, reverb and delay sends) the stems add up to the mix within about -67 dB of the mix.
   A muted or empty track gives a silent stem (a new FM1 mutes T6 and T7).
+- Cost (Node 24, factory project 02): 60 s of the mix alone renders in 1.2 s, with the seven stems in 1.8 s; at 48 kHz
+  with the stems 15 s, almost all of it the resampler (Felucca's, eight outputs).
 
 ## Timing
 
 - **Blocks.** FM1 Open's engine renders blocks of 128 frames only (the DX7 voices are made for 128-frame blocks, the
   mixer and the buses work on 128 frames, `fm1_engine_render` refuses another size), and takes its events between
   blocks; a block cannot be split at an event's frame without changing the engine. So events are **quantised to
-  128-frame blocks (2.9 ms at 44.1 kHz)**: a sequencer step sounds at the first block start at or after its exact time
-  (0 .. 127 frames late, as on the FM1; `plugin_test.mjs`: bar 64's kick at 123.45 BPM 0 .. 128 frames after its bar
-  line, bar 0's at frame 0), a MIDI event of use B is taken with the block whose start is nearest (within 64 frames;
-  tested: a note at beat 1, frame 22050, sounds at frame 22032).
+  128-frame blocks (2.9 ms at 44.1 kHz)**, each to the block start nearest to its exact time (within 64 frames, 1.45 ms):
+  a render's sequencer clock starts half a block ahead (`fm1_tutti_start_phase`), so a step sounds at the nearest block
+  start rather than the next one (on the FM1 itself: 0 .. 127 frames late); step 0 at frame 0 (`plugin_test.mjs`: bar
+  64's kick at 123.45 BPM 56.6 frames after its bar line, bar 0's at frame 0); a MIDI event of use B likewise (tested:
+  a note at beat 1, frame 22050, sounds at frame 22032).
 - **Latency.** `sim_render` gives the block before the one it renders: the renderer drops those 128 frames
   (`tutti_latency`), the stems' alike, so a render's frame 0 is the sound at `fromBeat`.
 - **Every render plays from the start.** A render of `[fromBeat, toBeat)` renders from beat 0 (the transport started at

@@ -28,7 +28,7 @@ enum { PERIOD = FM1_SAMPLE_RATE * 60U };
 #ifdef FM1_TUTTI
 uint64_t fm1_tutti_bpm_q32;
 unsigned fm1_tutti_clock_internal;
-uint32_t fm1_tutti_ticks;
+uint32_t fm1_tutti_ticks, fm1_tutti_start_phase;
 static uint32_t tutti_carry; /* the fraction of a clock unit not yet in phase, Q32 */
 #endif
 static const uint8_t common_chords[][8] = {
@@ -324,6 +324,7 @@ FM1_DSP_CODE void groove_sequence_transport(uint8_t status)
 #ifdef FM1_TUTTI
         tutti_carry = 0;
         fm1_tutti_ticks = 0;
+        c->phase = fm1_tutti_start_phase;
 #endif
         c->first = 1;
         c->playing = status == 0xfa;
@@ -432,12 +433,12 @@ FM1_DSP_CODE void groove_sequence_render(void)
 }
 #ifdef FM1_TUTTI
 uint32_t fm1_tutti_phase(void) { return sequence_clock.phase; }
-void fm1_tutti_locate(uint32_t ticks, uint32_t phase)
+void fm1_tutti_locate(uint32_t ticks, uint32_t phase, unsigned arm)
 {
     struct clock_state *c = &sequence_clock;
     if (!c->playing || clock_mode == GROOVE_CLOCK_MIDI) return;
     release(c);
-    c->first = 0;
+    c->first = arm != 0;
     c->countdown = 0;
     c->tick = (uint8_t)(ticks & 63U);
     c->phase = phase;
@@ -445,8 +446,8 @@ void fm1_tutti_locate(uint32_t ticks, uint32_t phase)
     fm1_tutti_ticks = ticks;
     for (unsigned i = 0; i < GROOVE_TRACKS; ++i) {
         c->length[i] = lengths[i];
-        c->current[i] = (uint8_t)(ticks % c->length[i]);
-        c->next[i] = (uint8_t)((ticks + 1U) % c->length[i]);
+        c->current[i] = (uint8_t)((ticks + (arm ? c->length[i] - 1U : 0U)) % c->length[i]);
+        c->next[i] = (uint8_t)((ticks + (arm ? 0U : 1U)) % c->length[i]);
     }
     clock_publish();
 }

@@ -32,7 +32,7 @@ const peak = (a) => a.reduce((m, x) => Math.max(m, Math.abs(x)), 0);
 const rms = (a) => Math.sqrt(a.reduce((s, x) => s + x * x, 0) / Math.max(1, a.length));
 const db = (x) => (20 * Math.log10(x)).toFixed(1);
 const same = (a, b) => a.length === b.length && Buffer.from(a.buffer, a.byteOffset, a.byteLength).equals(Buffer.from(b.buffer, b.byteOffset, b.byteLength));
-const STEMS = ["t1", "t2", "t3", "t4", "t5", "t6", "t7", "t8"], ALL = ["mix", ...STEMS];
+const STEMS = ["t1", "t2", "t3", "t4", "t5", "t67", "t8"], ALL = ["mix", ...STEMS];   // (protocol v0: 8 outputs at most)
 const NOTHING = { notes: [], cc: [], pitchBend: [], preRollBeats: 0 };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // a condition, polled (never a fixed time a fast machine could outrun): resolves when it holds, rejects after `ms`
@@ -154,7 +154,7 @@ const groove = await (async () => (await Dev.make()).load(grooveProject()).state
 for (const sr of [44100, 48000]) {
   const r = req({ outputs: ALL, sampleRate: sr, toBeat: 6, tailMs: 300 });
   const x = await renderAll(groove, r), y = await renderAll(groove, r);
-  check(`${sr} Hz: two renders (mix + 8 stems), byte for byte the same (fresh instances)`,
+  check(`${sr} Hz: two renders (mix + 7 stems), byte for byte the same (fresh instances)`,
         ALL.every((o) => same(x.out[o][0], y.out[o][0]) && same(x.out[o][1], y.out[o][1])) && peak(x.out.mix[0]) > 0.05);
 }
 { // the mix alone is the mix of a render with stems (the capture leaves the mix as it is)
@@ -167,7 +167,7 @@ for (const [bpm, from, to, tail, sr] of [[120, 0, 8, 0, 44100], [123.45, 4, 13.5
   const r = req({ context: ctxOf(bpm), fromBeat: from, toBeat: to, tailMs: tail, sampleRate: sr, outputs: ALL });
   const want = Math.round((to * 60 / bpm) * sr) - Math.round((from * 60 / bpm) * sr) + Math.ceil(tail * sr / 1000);
   const { out } = await renderAll(groove, r);
-  check(`${bpm} BPM [${from}, ${to}) + ${tail} ms at ${sr}: ${want} frames in each of 9 outputs`, ALL.every((o) => out[o][0].length === want && out[o][1].length === want));
+  check(`${bpm} BPM [${from}, ${to}) + ${tail} ms at ${sr}: ${want} frames in each of ${ALL.length} outputs`, ALL.every((o) => out[o][0].length === want && out[o][1].length === want));
 }
 { // a later start is the same audio as the frames of a render from 0 (every render plays from the start)
   const a = (await renderAll(groove, req({ context: ctxOf(123.45), fromBeat: 0, toBeat: 12, outputs: ["mix", "t2"] }))).out;
@@ -236,10 +236,11 @@ if (!FAST) {
     return got;
   };
   const bpm = 123.45, got = await clock(bpm, 64);
-  const err = got.map((f, k) => f - (k * 4 * 60 / bpm) * 44100), worst = Math.max(...err.map(Math.abs));
-  check(`123.45 BPM: 64 bars' starts on the clock each within 0.01 sample of the ideal (worst ${worst.toFixed(5)}, bar 64 at ${got[64].toFixed(2)})`, worst < 0.01);
-  // the sound: a kick on step 0 of a 16-step pattern; bar 64's against bar 0's. The engine takes a step at the first
-  // block start at or after its time (blocks of 128 frames: 0 .. 127 frames late, as on the FM1)
+  // (a render's clock starts half a block ahead, fm1_plugin.c tutti_start: its bar lines 64 frames before the ideal)
+  const err = got.map((f, k) => f - (k ? (k * 4 * 60 / bpm) * 44100 - BLOCK / 2 : 0)), worst = Math.max(...err.map(Math.abs));
+  check(`123.45 BPM: 64 bars' starts on the clock each within 0.01 sample of the ideal less half a block (worst ${worst.toFixed(5)}, bar 64 at ${got[64].toFixed(2)})`, worst < 0.01);
+  // the sound: a kick on step 0 of a 16-step pattern; bar 64's against bar 0's. The engine takes steps at block starts
+  // (blocks of 128 frames); a render's clock is half a block ahead, so a step takes the nearest one (within 64 frames)
   const p = new Project(base.b).clear().mute(0);
   for (let t = 0; t < 8; t++) p.length(t, 16);
   p.hit(7, 0, 1);
@@ -249,8 +250,8 @@ if (!FAST) {
   const from = Math.round(255.5 * 60 / bpm * 44100), onset = from + out.mix[0].findIndex((x) => Math.abs(x) > 1e-4);
   const head = (await renderAll(st, req({ context: ctxOf(bpm), fromBeat: 0, toBeat: 0.5, outputs: ["mix"] }))).out.mix[0].findIndex((x) => Math.abs(x) > 1e-4);
   const late = onset - head - F64;
-  check(`123.45 BPM: bar 64's kick at frame ${onset} (bar line ${F64.toFixed(2)}, bar 0's kick at ${head}): ${late.toFixed(2)} frames late, within a block (0 .. 128)`,
-        late >= 0 && late < BLOCK && head === 0);
+  check(`123.45 BPM: bar 64's kick at frame ${onset} (bar line ${F64.toFixed(2)}, bar 0's kick at ${head}): ${late.toFixed(2)} frames off, the nearest block start (within 64)`,
+        Math.abs(late) <= BLOCK / 2 && head === 0);
 }
 
 // ---- stems
@@ -258,14 +259,14 @@ if (!FAST) {
   const st = groove;
   const { out } = await renderAll(st, req({ outputs: ALL, toBeat: 8, tailMs: 500 }));
   const p = pk(out);
-  check(`stems: T1..T5 and T8 sound (${["t1", "t2", "t3", "t4", "t5", "t8"].map((o) => p[o].toFixed(3)).join(" ")}), T6, T7 (muted, empty) silent (${p.t6} ${p.t7})`,
-        ["t1", "t2", "t3", "t4", "t5", "t8"].every((o) => p[o] > 1e-3) && p.t6 === 0 && p.t7 === 0);
+  check(`stems: T1..T5 and T8 sound (${["t1", "t2", "t3", "t4", "t5", "t8"].map((o) => p[o].toFixed(3)).join(" ")}), T6 + T7 (muted, empty) silent (${p.t67})`,
+        ["t1", "t2", "t3", "t4", "t5", "t8"].every((o) => p[o] > 1e-3) && p.t67 === 0);
   const sumErr = [0, 1].map((c) => {
     const e = new Float32Array(out.mix[c].length);
     for (let i = 0; i < e.length; i++) { let s = out.mix[c][i]; for (const o of STEMS) s -= out[o][c][i]; e[i] = s; }
     return rms(e) / rms(out.mix[c]);
   });
-  console.log(`plugin:   (mix - (t1 + .. + t8): ${db(sumErr[0])} / ${db(sumErr[1])} dB of the mix, L / R: the buses' saturation and gate, rounding)`);
+  console.log(`plugin:   (mix - (t1 + .. + t5 + t67 + t8): ${db(sumErr[0])} / ${db(sumErr[1])} dB of the mix, L / R: the buses' saturation and gate, rounding)`);
   check("stems add up to the mix within -50 dB (README: best effort)", sumErr.every((x) => x < 10 ** (-50 / 20)));
   const solo = (await renderAll(st, req({ outputs: ["t3"], toBeat: 8, tailMs: 500 }))).out.t3;
   check("a stem rendered alone is the same as with the mix and the other stems", same(solo[0], out.t3[0]) && same(solo[1], out.t3[1]));
@@ -308,7 +309,7 @@ if (!FAST) {
 }
 { // each channel its track: 0..7 -> T1..T8 (T6, T7 muted in the project: unmuted as PLAY tracks), 8.. nothing
   const one = (channel, pitch) => ({ ...NOTHING, notes: [{ beat: 1, lengthBeats: 1, pitch, velocity: 110, channel }] });
-  for (const [ch, pitch, want] of [[0, 60, "t1"], [1, 48, "t2"], [2, 67, "t3"], [3, 64, "t4"], [4, 36, "t5"], [5, 72, "t6"], [6, 40, "t7"], [7, 36, "t8"], [7, 38, "t8"], [9, 60, null], [15, 60, null]]) {
+  for (const [ch, pitch, want] of [[0, 60, "t1"], [1, 48, "t2"], [2, 67, "t3"], [3, 64, "t4"], [4, 36, "t5"], [5, 72, "t67"], [6, 40, "t67"], [7, 36, "t8"], [7, 38, "t8"], [9, 60, null], [15, 60, null]]) {
     const p = pk((await renderAll(groove, req({ input: one(ch, pitch), outputs: ALL, toBeat: 4, tailMs: 300 }))).out);
     const others = STEMS.filter((o) => o !== want).every((o) => p[o] === 0);
     check(`use B: channel ${ch} note ${pitch} -> ${want || "nothing"} only (${want ? p[want].toFixed(3) : p.mix})`, others && (want ? p[want] > 0.003 && p.mix > 0.003 : p.mix === 0));
@@ -425,6 +426,12 @@ if (!FAST) {
   const at = [];
   for (const s of [0, 1, 7.5, 64 * 16 + 3.25, 10001.75]) { d.ex.tutti_live_play(s); at.push([s, d.ex.tutti_live_pos()]); }
   check(`preview: placed at ${at.map(([s, p]) => `${s} -> ${p.toFixed(3)}`).join(", ")} sixteenths (with swing 30)`, at.every(([s, p]) => Math.abs(s - p) < 1e-6));
+  const arm = await Dev.make((await Dev.make()).load(new Project(base.b).clear().note(0, 0, 60).note(0, 4, 60).mute(0)).state(), { hosted: true });
+  arm.ex.tutti_tempo(120);
+  const heard = (s) => { arm.ex.tutti_live_play(s); let p = 0; for (let k = 0; k < 40; k++) { const o = new Float32Array(arm.ex.memory.buffer, arm.ex.sim_render(), 256); for (const x of o) p = Math.max(p, Math.abs(x)); } arm.ex.tutti_live_stop(); for (let k = 0; k < 400; k++) arm.ex.sim_render(); return p; };
+  const p0 = heard(0), pIn = heard(0.0001), pLate = heard(0.5);
+  check(`preview: placed on a step (0, or just past it) the step sounds (${p0.toFixed(3)}, ${pIn.toFixed(3)}); placed mid-step it does not (${pLate.toFixed(4)})`,
+        p0 > 0.01 && pIn > 0.01 && pLate < p0 / 20);
   d.ex.tutti_live_play(32);
   d.run(1000);
   const pos = d.ex.tutti_live_pos(), want = 32 + 123.45 / 60 * 4;
@@ -515,12 +522,13 @@ class NodeLive {
   close() { this.closed = true; }
 }
 const blank = async () => (await Dev.make()).state();
+const checkState = async (st) => { await Dev.make(st); };   // (as the page's: the project must load)
 const HOST = "https://tuttidaw.com";
 function harness({ live = null, chunkFrames } = {}) {
   const hello = [];
   const engine = new FM1Engine({
     render: (state, r, sink) => render(mod, state, r, sink, chunkFrames ? { chunkFrames } : {}),
-    blank, live, onChanged: (rev) => session.stateChanged(rev),
+    blank, check: checkState, live, onChanged: (rev) => session.stateChanged(rev),
   });
   if (live) live.engine = engine;
   const session = new PluginSession({ engine, post: (m) => hello.push(m), plugin: { id: "com.weavejam.fm1open", version: "t", build: "t" } });
@@ -634,7 +642,15 @@ const settled = async (h, id) => {
   h4.connect();
   h4.send({ type: "init", id: "i6", sampleRate: 44100, context: ctxOf(120), state: packState(groove), stateVersion: 9, mode: "render" });
   const i6 = await h4.reply("i6");
-  check("init with a foreign state or an unread version: state-incompatible", i5.code === "state-incompatible" && i6.code === "state-incompatible");
+  const broken = { ...groove, project: groove.project.slice() };
+  broken.project[4260] ^= 0xFF;                        // (the tuning tail's CRC: sim_import refuses the project)
+  const h5 = harness();
+  h5.connect();
+  h5.send({ type: "init", id: "i7", sampleRate: 44100, context: ctxOf(120), state: packState(broken), stateVersion: 1, mode: "edit" });
+  const i7 = await h5.reply("i7");
+  h5.close();
+  check(`init with a foreign state, an unread version, a project the device cannot load: state-incompatible (${i5.code} ${i6.code} ${i7.code})`,
+        i5.code === "state-incompatible" && i6.code === "state-incompatible" && i7.code === "state-incompatible");
   h.close(); h3.close(); h4.close();
 }
 
@@ -775,7 +791,7 @@ const settled = async (h, id) => {
     check(`site ${channel}: build-info EMBEDDERS and every frame-ancestors = ${CHANNELS[channel].join(" ")}`,
           JSON.stringify(info.EMBEDDERS) === JSON.stringify(CHANNELS[channel]) && anc.length === 2 &&
           anc.every((a) => a === CHANNELS[channel].join(" ")) && info.BUILD.channel === channel);
-    check(`site ${channel}: manifest id, name, vendor, licence, notice, outputs mix + t1..t8, seek false, midiChannels 0..7, the pinned source`,
+    check(`site ${channel}: manifest id, name, vendor, licence, notice, outputs mix t1..t5 t67 t8, seek false, midiChannels 0..7, the pinned source`,
           m.id === "com.weavejam.fm1open" && m.name === "FM1 Open" && m.vendor === "weavejam (FM1 Open firmware by M-VAVE, open source)" &&
           m.license === "GPL-3.0-only" && m.notice === "Unofficial plugin build of M-VAVE's open-source FM1 Open firmware by weavejam. Not affiliated with or endorsed by M-VAVE." &&
           m.upstream === "https://github.com/m-vave/fm1_open" && m.capabilities.outputs.map((o) => o.id).join() === ALL.join() &&

@@ -138,7 +138,7 @@ document.getElementById("play").onclick = () => transport(true, 0);
 document.getElementById("stop").onclick = () => transport(false);
 document.getElementById("get").onclick = getState;
 document.getElementById("rmix").onclick = () => render(["mix"]).then(play);
-document.getElementById("rstems").onclick = () => render(["mix", "t1", "t2", "t3", "t4", "t5", "t6", "t7", "t8"]).then(play);
+document.getElementById("rstems").onclick = () => render(["mix", "t1", "t2", "t3", "t4", "t5", "t67", "t8"]).then(play);
 document.getElementById("cancel").onclick = () => { for (const id of renders.keys()) port.postMessage({ type: "cancel", sessionId, renderId: id }); };
 frame.src = new URL(manifest.entry, origin).href;
 window.host = { init, getState, render, transport, request, events, manifest, get revision() { return revision; },

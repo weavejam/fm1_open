@@ -27,7 +27,7 @@ const sameBytes = (a, b) => { if (!a || a.length !== b.length) return false; for
 class FM1Tutti extends AudioWorkletProcessor {
   constructor() {
     super();
-    this.module = null;
+    this.compiled = null;                              // (the wasm compiled, a promise: loads wait for it)
     this.c = null;
     this.bpm = 0;
     this.play = null;                                  // a start to come: {gen, atFrame, beat, bpm}
@@ -39,7 +39,11 @@ class FM1Tutti extends AudioWorkletProcessor {
 
   async onMessage(m) {
     try {
-      if (m.type === "load") return await this.load(m);
+      if (m.type === "load") {                         // (one load after another: a second waits for the first's compile)
+        if (m.wasm) this.compiled = WebAssembly.compile(m.wasm);
+        this.loading = (this.loading || Promise.resolve()).then(() => this.load(m), () => this.load(m));
+        return await this.loading;
+      }
       if (m.type === "tutti-tempo") {
         this.bpm = m.bpm;
         if (this.c) this.c.tutti_tempo(m.bpm);         // (out of FM1 Open's range: refused, the tempo stays)
@@ -69,8 +73,7 @@ class FM1Tutti extends AudioWorkletProcessor {
   }
 
   async load(m) {
-    if (m.wasm) this.module = await WebAssembly.compile(m.wasm);
-    const { exports: c } = await WebAssembly.instantiate(this.module, {});
+    const { exports: c } = await WebAssembly.instantiate(await this.compiled, {});
     c._initialize();
     if (this.bpm) c.tutti_tempo(this.bpm);
     bootDevice(c, m.state, { hosted: !!m.hosted, bpm: this.bpm });

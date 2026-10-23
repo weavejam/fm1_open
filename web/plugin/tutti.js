@@ -12,7 +12,7 @@
 // The layout fits any frame, never a page scrollbar (layout below).
 import { PluginSession, embedderAllowed } from "./protocol.js";
 import { FM1Engine, PreviewTempo } from "./engine.js";
-import { RenderError } from "./renderer.js";
+import { RenderError, OUTPUTS } from "./renderer.js";
 import { packState, unpackState, STATE_VERSION, bootDevice, deviceState } from "./state.js";
 import { createDevice } from "./device.js";
 import { createPanel } from "./panel.js";
@@ -69,7 +69,8 @@ let projectName = null, ac = null, node = null, wasmBytes = null, wasmModule = n
 const waits = new Map();
 const status = window.fm1Plugin = { ready: false, sig: 0, frames: 0 };   // (what the page's FM1 does, to look at)
 const post = (m, transfer) => { if (node) node.port.postMessage(m, transfer || []); };
-const tempo = new PreviewTempo((bpm) => post({ type: "tutti-tempo", bpm }));
+// the host's tempo, hosted only (by itself FM1 Open plays its project's tempo: no runtime override)
+const tempo = new PreviewTempo((bpm) => { if (hosted) post({ type: "tutti-tempo", bpm }); });
 function send(type, args = {}) { if (ready) post({ type: "cmd", cmd: { type, ...args } }); }
 function request(type, args = {}) {
   if (!ready) return Promise.reject(Error("仿真尚未载入"));
@@ -91,7 +92,8 @@ function ask(type, extra = {}) {                       // the worklet's tutti re
 const say = (text) => note(text);
 const device = createDevice({ root: $("sim-device"), send, request, say, start: () => startAudio() });
 const panel = createPanel({ root: $("tt-side"), send, request, say, encode, save, start: () => startAudio() });
-device.onVolume((v) => send("control", { kind: 3, index: 0, value: Math.round(v * 1023 / 100) }));
+device.onVolume((v) => { send("control", { kind: 3, index: 0, value: Math.round(v * 1023 / 100) }); $("tt-vol").value = v; });
+device.master.set(+$("tt-vol").value);                   // (the MASTER dial drawn where the volume is)
 
 function onNode(e) {
   const m = e.data;
@@ -136,6 +138,12 @@ async function wasm() {
   return wasmModule;
 }
 // a new FM1's state (engine init without a state): booted in an instance of its own, as the workbench starts
+// a state's project must load (init answers state-incompatible otherwise, before init:ok): booted in an instance here
+async function check(state) {
+  const { exports: ex } = await WebAssembly.instantiate(await wasm(), {});
+  ex._initialize();
+  bootDevice(ex, state);
+}
 async function blank() {
   const { exports: ex } = await WebAssembly.instantiate(await wasm(), {});
   ex._initialize();
@@ -249,7 +257,7 @@ function save(bytes, name) {                           // (a sandboxed frame has
 async function commit() {
   let steps = 0;
   try { steps = (await ask("steps")).steps; } catch {}
-  const outputs = $("tt-stems").checked ? ["mix", "t1", "t2", "t3", "t4", "t5", "t6", "t7", "t8"] : ["mix"];
+  const outputs = $("tt-stems").checked ? OUTPUTS.map((o) => o.id) : ["mix"];
   const beats = steps / 4;
   session.commit(beats > 0 ? { fromBeat: 0, toBeat: beats, outputs, lengthBeats: beats } : { outputs });
 }
@@ -321,6 +329,7 @@ function encode(pcm) {
 const engine = new FM1Engine({
   render: renderInWorker,
   blank,
+  check,
   live,
   onChanged: (rev) => session.stateChanged(rev),
   name: () => (hosted && projectName) || null,          // (get-state summary: the project's name)

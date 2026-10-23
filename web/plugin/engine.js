@@ -5,6 +5,7 @@
 // mode) when there is one.
 //   render(state, request, sink) -> result      renderer.js render, here or in a Worker (render-worker.js)
 //   blank() -> Promise<state>                   a new FM1's state (init without a state: revision 1 is that one)
+//   check(state) -> Promise                     throws StateError when the device cannot load the state (init)
 //   live (edit mode, the page; null headless): {
 //     load(state, context) -> Promise          (re)start the live device with this state ({project, sectors, meta},
 //                                              state.js)
@@ -21,9 +22,10 @@ import { RenderError, checkTimeMap, tempoAt, MIN_BPM, MAX_BPM } from "./renderer
 const KEEP = 8;                                        // revisions whose states are kept for renders
 
 export class FM1Engine {
-  constructor({ render, blank, live = null, onChanged = () => {}, name = () => null }) {
+  constructor({ render, blank, check = async () => {}, live = null, onChanged = () => {}, name = () => null }) {
     this.renderFn = render;
     this.blank = blank;
+    this.check = check;
     this.live = live;
     this.onChanged = onChanged;                        // (revision): the session's state-changed
     this.name = name;
@@ -37,6 +39,7 @@ export class FM1Engine {
   async init({ context, state, stateVersion, mode }) {
     const epoch = ++this.epoch;
     const st = state ? unpackState(state, stateVersion) : await this.blank();
+    if (state) await this.check(st);
     if (epoch !== this.epoch) throw new RenderError("session-ended", "the session ended");
     this.mode = mode;
     this.ctx = context;                                // (not `context`: that is the method)
@@ -121,12 +124,14 @@ export class PreviewTempo {
     this.send = send;
     this.pts = [{ beat: 0, bpm: 120, ramp: "step" }];
     this.bpm = 0;                                      // the one sent (0: none yet)
+    this.beat = 0;                                     // where the host's transport was last
   }
   context(ctx) {
     try { this.pts = checkTimeMap(ctx && ctx.timeMap); } catch { return; }
-    this.at(0);
+    this.at(this.beat);                                // (a new map: the tempo where the transport is)
   }
   at(beat) {
+    this.beat = beat;
     const b = Math.min(MAX_BPM, Math.max(MIN_BPM, tempoAt(this.pts, beat)));
     if (b !== this.bpm) { this.bpm = b; this.send(b); }
   }
