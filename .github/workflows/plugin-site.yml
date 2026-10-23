@@ -1,0 +1,90 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (C) 2026 weavejam
+# FM1 Open for tuttidaw (web/plugin/README.md): the plugin built from source with WASI SDK 27 (pinned: the release
+# tarball's SHA-256), its tests, and its static site for both deployment channels (web/plugin/site.mjs PLUGIN_CHANNEL):
+# production (embeddable by https://tuttidaw.com and https://www.tuttidaw.com only) kept as an artifact on a push to
+# main, preview (also http://localhost:<port>) on a pull request. Also the upstream check that runs on Linux
+# (tools/Generate-Factory-DX7.mjs --check). Never M-VAVE's binary SDK (sdk/lib): the plugin builds from source only.
+# After weavejam's FM-1 plugins' plugin-site.yml. Third-party actions are pinned to commits (the tag in the comment).
+name: plugin-site
+
+on:
+  push:
+    branches: [main]
+    paths: ["app/**", "web/**", "third_party/**", "sdk/include/**", "sdk/I18n.js", "sdk/WebUpdate.js", "tools/**",
+            "LICENSE.md", "THIRD_PARTY.md", ".gitignore", ".github/workflows/plugin-site.yml"]
+  pull_request:
+    paths: ["app/**", "web/**", "third_party/**", "sdk/include/**", "sdk/I18n.js", "sdk/WebUpdate.js", "tools/**",
+            "LICENSE.md", "THIRD_PARTY.md", ".gitignore", ".github/workflows/plugin-site.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: plugin-site-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}   # (every build of main runs to its end)
+
+env:
+  WASI_SDK_URL: https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-27/wasi-sdk-27.0-x86_64-linux.tar.gz
+  WASI_SDK_SHA256: b7d4d944c88503e4f21d84af07ac293e3440b1b6210bfd7fe78e0afd92c23bc2
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262   # v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020   # v4
+        with:
+          node-version: "24"
+
+      # outside the tree (the site needs a clean tree), checked by its SHA-256 before use
+      - name: WASI SDK 27 (pinned)
+        run: |
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/wasi-sdk.tar.gz" "$WASI_SDK_URL"
+          echo "$WASI_SDK_SHA256  $RUNNER_TEMP/wasi-sdk.tar.gz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/wasi-sdk.tar.gz" -C "$RUNNER_TEMP"
+          echo "FM1_WASI_SDK=$RUNNER_TEMP/wasi-sdk-27.0-x86_64-linux" >> "$GITHUB_ENV"
+
+      - name: Upstream check (the factory DX7 bank reproduces from the recovery image)
+        run: node tools/Generate-Factory-DX7.mjs --check
+
+      # both channels from one wasm; site.mjs fails on a tree with changes not in the commit (the source link)
+      - name: FM1 Open plugin (web/plugin) and its sites
+        run: |
+          git status --porcelain
+          PLUGIN_CHANNEL="production preview" node web/plugin/build.mjs
+
+      - name: Tests (the renderer, the state, the protocol, the sites)
+        run: node web/plugin/plugin_test.mjs build/plugin-wasm/fm1open.wasm
+
+      - name: Keep the production site
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02   # v4
+        with:
+          name: fm1open-plugin-site
+          path: build/plugin-site
+          include-hidden-files: true
+          if-no-files-found: error
+
+      - name: Keep the preview site
+        if: github.event_name != 'push'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02   # v4
+        with:
+          name: fm1open-plugin-site-preview
+          path: build/plugin-site-preview
+          include-hidden-files: true
+          if-no-files-found: error
+
+      # Deployment (by the lead for now: https://fm1open.plugins.tooljams.com, https://fm1open-preview.plugins.tooljams.com),
+      # only from a push to main (the production site). To deploy from here: a Pages project, the secrets
+      # CLOUDFLARE_API_TOKEN (Pages: Edit) and CLOUDFLARE_ACCOUNT_ID, then uncomment:
+      # - name: Deploy to Cloudflare Pages
+      #   if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+      #   uses: cloudflare/wrangler-action@9acf94ace14e7dc412b076f2c5c20b8ce93c79cd   # v3
+      #   with:
+      #     apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      #     accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      #     command: pages deploy build/plugin-site --project-name=fm1open-tutti-plugin --branch=main
