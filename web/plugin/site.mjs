@@ -61,7 +61,7 @@ const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">"
 
 // ---- the plugin: the page, its modules, the wasm, the workbench's texts and file formats
 copy(wasmPath, "plugin/fm1open.wasm");
-for (const f of ["index.html", "device.css", "plugin.css", "tutti.js", "device.js", "panel.js", "samples.js", "protocol.js",
+for (const f of ["index.html", "device.css", "plugin.css", "tutti.js", "device.js", "panel.js", "samples.js", "protocol.js", "fm1-panel.js",
                  "engine.js", "renderer.js", "resample.js", "state.js", "render-worker.js", "worklet-tutti.js"])
   copy(src("web/plugin", f), `plugin/${f}`);
 for (const f of ["I18n.js", "WebUpdate.js"]) copy(src("sdk", f), `plugin/${f}`);
@@ -177,6 +177,7 @@ const manifest = {
     tempoMap: "constant",
     sampleRates: SAMPLE_RATES,
     seek: false,                                       // every render plays from beat 0 (renderer.js)
+    fm1Panel: true,                                    // a hardware FM-1 through tuttidaw (fm1-panel.js; protocol 12)
     midiChannels: Array.from({ length: TRACKS }, (_, t) => ({ channel: t, name: `T${t + 1}` })),
   },
 };
