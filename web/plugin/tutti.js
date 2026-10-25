@@ -16,6 +16,7 @@ import { RenderError, OUTPUTS } from "./renderer.js";
 import { packState, unpackState, STATE_VERSION, bootDevice, deviceState } from "./state.js";
 import { createDevice } from "./device.js";
 import { createPanel } from "./panel.js";
+import { PanelBridge } from "./fm1-panel.js";
 import { BUILD, EMBEDDERS } from "./build-info.js";
 
 const embedded = window.parent !== window;
@@ -94,6 +95,11 @@ const device = createDevice({ root: $("sim-device"), send, request, say, start: 
 const panel = createPanel({ root: $("tt-side"), send, request, say, encode, save, start: () => startAudio() });
 device.onVolume((v) => { send("control", { kind: 3, index: 0, value: Math.round(v * 1023 / 100) }); $("tt-vol").value = v; });
 device.master.set(+$("tt-vol").value);                   // (the MASTER dial drawn where the volume is)
+// a hardware FM-1 through tuttidaw (fm1-panel.js): its controls as the page's, its screen and LEDs from the frames
+const hardware = new PanelBridge((m, transfer) => session.send(m, transfer), {
+  control: (kind, index, value) => send("control", { kind, index, value }),
+  master: (value) => device.master.set(Math.round(value * 100 / 1023)),
+});
 
 function onNode(e) {
   const m = e.data;
@@ -102,6 +108,7 @@ function onNode(e) {
     if (m.workspace) projectName = m.workspace.name;
     device.receive(m);
     panel.receive(m);
+    hardware.frame(m);
     const playing = status.playing = !!m.state[14];
     if ($("tt-play").getAttribute("aria-pressed") !== String(playing)) {
       $("tt-play").setAttribute("aria-pressed", String(playing));
@@ -339,6 +346,7 @@ const session = new PluginSession({
   post: (m) => window.parent.postMessage(m, "*"),
   allow: (origin) => embedderAllowed(origin, EMBEDDERS),   // (the build's channel: site.mjs PLUGIN_CHANNEL)
   plugin: { id: BUILD.id, version: BUILD.version, build: BUILD.build },
+  panel: hardware,
   log,
 });
 const initOrig = engine.init.bind(engine);
