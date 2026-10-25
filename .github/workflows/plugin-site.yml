@@ -60,6 +60,9 @@ jobs:
       - name: Tests (the renderer, the state, the protocol, the sites)
         run: node web/plugin/plugin_test.mjs build/plugin-wasm/fm1open.wasm
 
+      - name: Tests (a hardware FM-1 through tuttidaw, fm1-panel.js)
+        run: node web/plugin/fm1_panel_test.mjs
+
       - name: Keep the production site
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02   # v4
